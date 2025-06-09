@@ -1,0 +1,59 @@
+data:
+  # File paths
+  latest_path: "data/latest_draw.csv" 
+  historical_path: "data/historical.csv"  # Required (format: MM/DD/YY,N1-N2-N3-N4-N5-N6)
+  upcoming_path: " "      # Optional (same format as historical)
+  stats_dir: "stats/"                    # Directory for analysis files
+  results_dir: "results/"                # Directory for generated number sets
+  
+  # Upcoming draw handling
+  merge_upcoming: true     # Whether to merge upcoming draws into historical data
+  archive_upcoming: true   # Whether to create audit log of processed upcoming draws
+
+validation:  # New section
+  mode: "none"  # Options: "historical", "new_draw", "both", "none"
+  test_draws: 300      # Number of past draws to test against
+  alert_threshold: 4  # Minimum matches to trigger alerts
+  save_report: true   # Generate validation.json
+
+strategy:
+  # Number pool configuration
+  number_pool: 55          # Total numbers in the lottery (1-55)
+  numbers_to_select: 6     # Numbers to pick per set
+  
+  # Weight distribution (must sum to 1.0)
+  frequency_weight: 0.45    # Historical frequency importance (40%)
+  recent_weight: 0.5       # Recent appearances importance (20%)
+  random_weight: 0.05       # Pure randomness component (40%)
+  
+  # Strategic rules
+  low_number_max: 10       # Numbers ≤10 are considered "low"
+  low_number_chance: 0.7   # 70% chance to include ≥1 low number
+  high_prime_min: 35       # Primes >35 are "high primes"
+  high_prime_chance: 0.25  # 25% chance to include 1 high prime
+  
+  # Cold number handling
+  cold_threshold: 30       # Number of past draws to check for cold numbers
+  resurgence_threshold: 2  # Appearances needed to exit "cold" status
+
+output:
+  sets_to_generate: 4     # Number of sets to produce
+  save_analysis: true      # Whether to save statistical reports
+  verbose: true           # Whether to show detailed processing info
+ 
+analysis:
+  default_match_threshold: 4    # Fallback when CLI not provided
+  default_show_top: 5           # Fallback when CLI not provided
+  min_display_matches: 1        # Hide single matches if needed
+  recency_units: draws  # "draws" or "days"
+  recency_bins:
+    hot: 15    # Recent threshold
+    warm: 30   # Semi-recent
+    cold: 31   # Beginning of "cold" range
+  show_combined_stats: true
+  top_range: 10
+  combination_analysis:
+    quadruplets: true
+    quintuplets: true
+    sixtuplets: true 
+  min_combination_count: 2
