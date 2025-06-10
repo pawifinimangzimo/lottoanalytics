@@ -394,7 +394,8 @@ def main():
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            dashboard_path = dashboard.generate(data)
+            # dashboard_path = dashboard.generate(data)
+            dashboard_path = dashboard.generate()
             print(f"🌐 Dashboard generated at: {dashboard_path}")
             print(f"   Serve with: python -m http.server --directory {dashboard.dashboard_dir} 8000")
             
