@@ -184,108 +184,158 @@ class LotteryAnalyzer:
 # ======================
 # DASHBOARD GENERATOR
 # ======================
+
 class DashboardGenerator:
     def __init__(self, analyzer: LotteryAnalyzer):
         self.analyzer = analyzer
         self.dashboard_dir = Path(analyzer.config['data']['results_dir']) / "dashboard"
         self.dashboard_dir.mkdir(exist_ok=True)
-        
-        # Embedded Chart.js (minified)
-        self.chart_js = """
-        /*! Chart.js v3.9.1 | MIT */
-        !function(...){...} // [Actual minified Chart.js code would go here]
+
+    def _generate_number_card(self, title: str, numbers: list, color_class: str) -> str:
+        """Generate a card with number bubbles"""
+        numbers_html = "".join(
+            f'<div class="number-bubble {color_class}">{num}</div>'
+            for num in numbers[:15]  # Show up to 15 numbers
+        )
+        return f"""
+        <div class="analysis-card">
+            <h3>{title}</h3>
+            <div class="number-grid">{numbers_html}</div>
+        </div>
         """
 
-    def generate(self, data: dict) -> str:
-        """Generate complete dashboard"""
-        # Save data
-        (self.dashboard_dir / "data.json").write_text(json.dumps(data))
+    def _generate_frequency_chart(self, frequencies: pd.Series) -> str:
+        """Generate the frequency chart HTML"""
+        top_numbers = frequencies.head(10).index.tolist()
+        counts = frequencies.head(10).values.tolist()
         
-        # Generate HTML
+        return f"""
+        <div class="chart-card">
+            <h3>Top 10 Frequent Numbers</h3>
+            <div class="chart-container">
+                <canvas id="frequencyChart"></canvas>
+            </div>
+            <div class="chart-data" hidden>
+                {json.dumps({"numbers": top_numbers, "counts": counts})}
+            </div>
+        </div>
+        """
+
+    def _generate_recent_draws(self, count: int = 5) -> str:
+        """Show recent draws"""
+        recent = pd.read_sql(
+            f"SELECT * FROM draws ORDER BY date DESC LIMIT {count}",
+            self.analyzer.conn
+        )
+        rows = "".join(
+            f"<tr><td>{row['date']}</td><td>{'-'.join(str(row[f'n{i}']) for i in range(1,7))}</td></tr>"
+            for _, row in recent.iterrows()
+        )
+        return f"""
+        <div class="recent-card">
+            <h3>Last {count} Draws</h3>
+            <table>
+                <tr><th>Date</th><th>Numbers</th></tr>
+                {rows}
+            </table>
+        </div>
+        """
+
+    def generate(self) -> str:
+        """Generate complete dashboard"""
+        # Get analysis data
+        freqs = self.analyzer.get_frequencies()
+        temps = self.analyzer.get_temperature_stats()
+        
+        # Generate HTML components
+        cards = [
+            self._generate_number_card("Hot Numbers", temps['hot'], 'hot'),
+            self._generate_number_card("Cold Numbers", temps['cold'], 'cold'),
+            self._generate_number_card("Frequent Numbers", freqs.index.tolist(), 'frequent'),
+            self._generate_frequency_chart(freqs),
+            self._generate_recent_draws()
+        ]
+        
+        # Complete HTML
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>Lottery Dashboard</title>
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; }}
-                .dashboard {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }}
-                .card {{ background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; }}
-                .number-grid {{ display: grid; grid-template-columns: repeat(10, 30px); gap: 5px; margin-top: 15px; }}
-                .number {{ width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; 
-                         border-radius: 50%; font-weight: bold; font-size: 14px; }}
-                .hot {{ background-color: #ff4757; color: white; }}
-                .cold {{ background-color: #3742fa; color: white; }}
-                .frequent {{ background-color: #2ed573; color: white; }}
-                .timestamp {{ color: #7f8c8d; font-size: 12px; margin-top: 20px; text-align: right; }}
-                canvas {{ width: 100% !important; height: 300px !important; }}
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .dashboard {{ 
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+                    gap: 20px; 
+                }}
+                .analysis-card, .chart-card, .recent-card {{
+                    background: white;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                    padding: 15px;
+                }}
+                .number-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+                    gap: 8px;
+                    margin-top: 10px;
+                }}
+                .number-bubble {{
+                    width: 30px;
+                    height: 30px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                }}
+                .hot {{ background-color: #ff6b6b; color: white; }}
+                .cold {{ background-color: #74b9ff; color: white; }}
+                .frequent {{ background-color: #2ecc71; color: white; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                .chart-container {{ position: relative; height: 300px; margin-top: 15px; }}
+                h3 {{ margin-top: 0; color: #2c3e50; }}
             </style>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         </head>
         <body>
             <h1>Lottery Analysis Dashboard</h1>
             <div class="dashboard">
-                {self._generate_card("Hot Numbers", data['hot'], 'hot')}
-                {self._generate_card("Cold Numbers", data['cold'], 'cold')}
-                {self._generate_card("Top Numbers", 
-                    [{'num':x[0],'freq':x[1]} for x in 
-                    zip(data['frequencies']['num'], data['frequencies']['frequency'])], 
-                    'frequent')}
-                <div class="card" style="grid-column: span 2;">
-                    <h2>Frequency Distribution</h2>
-                    <canvas id="chart"></canvas>
-                </div>
+                {"".join(cards)}
             </div>
-            <div class="timestamp">
-                Last updated: <span id="timestamp">{data['timestamp']}</span>
-            </div>
-            
             <script>
-                {self.chart_js}
-                
-                // Initialize chart
-                const ctx = document.getElementById('chart');
-                const chart = new Chart(ctx, {{
-                    type: 'bar',
-                    data: {{
-                        labels: {json.dumps([x[0] for x in zip(data['frequencies']['num'], data['frequencies']['frequency'])][:10])},
-                        datasets: [{{
-                            label: 'Frequency',
-                            data: {json.dumps([x[1] for x in zip(data['frequencies']['num'], data['frequencies']['frequency'])][:10])},
-                            backgroundColor: '#2ed573'
-                        }}]
-                    }},
-                    options: {{
-                        responsive: true,
-                        maintainAspectRatio: false
+                // Initialize frequency chart
+                const freqData = JSON.parse(
+                    document.querySelector('.chart-data').innerHTML
+                );
+                new Chart(
+                    document.getElementById('frequencyChart'),
+                    {{
+                        type: 'bar',
+                        data: {{
+                            labels: freqData.numbers,
+                            datasets: [{{
+                                label: 'Appearances',
+                                data: freqData.counts,
+                                backgroundColor: '#2ecc71'
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }}
                     }}
-                }});
-                
-                // Auto-refresh logic
-                setInterval(async () => {{
-                    const res = await fetch('data.json?t=' + Date.now());
-                    const data = await res.json();
-                    document.getElementById('timestamp').textContent = data.timestamp;
-                    chart.data.datasets[0].data = data.frequencies.frequency.slice(0, 10);
-                    chart.update();
-                }}, 300000);
+                );
             </script>
         </body>
         </html>
         """
+        
+        # Save to file
         (self.dashboard_dir / "index.html").write_text(html)
         return str(self.dashboard_dir / "index.html")
-
-    def _generate_card(self, title: str, numbers: list, css_class: str) -> str:
-        nums = "".join(
-            f'<div class="number {css_class}">{n["num"] if isinstance(n, dict) else n}</div>' 
-            for n in numbers[:10]
-        )
-        return f"""
-        <div class="card">
-            <h2>{title}</h2>
-            <div class="number-grid">{nums}</div>
-        </div>
-        """
 
 # ======================
 # MAIN APPLICATION
