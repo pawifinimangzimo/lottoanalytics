@@ -181,9 +181,9 @@ class LotteryAnalyzer:
         """
         
         hot = pd.read_sql(hot_query, self.conn, 
-                         params=(self.config['analysis']['top_n_results'],))
+                         params=(self.config['analysis']['top_range'],))
         cold = pd.read_sql(cold_query, self.conn,
-                          params=(self.config['analysis']['top_n_results'],))
+                          params=(self.config['analysis']['top_range'],))
         
         return {
             'hot': hot['num'].tolist(),
