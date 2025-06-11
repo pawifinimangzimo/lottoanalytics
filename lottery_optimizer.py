@@ -44,6 +44,10 @@ DEFAULT_CONFIG = {
 class LotteryAnalyzer:
     def __init__(self, config: Dict):
         self.config = config
+        # Add validation
+        if 'sets_to_generate' not in self.config['output']:
+            self.config['output']['sets_to_generate'] = 4
+        # Rest of your init code
         self.conn = self._init_db()
         self._prepare_filesystem()
 
@@ -147,28 +151,35 @@ class LotteryAnalyzer:
             'hot': hot['num'].tolist(),
             'cold': cold['num'].tolist()
         }
+#======================
+# Start Set generator
+#======================
 
     def generate_sets(self, strategy: str = 'balanced') -> List[List[int]]:
-        """Generate number sets using configured strategy"""
-        freqs = self.get_frequencies()
-        temps = self.get_temperature_stats()
+        """Generate multiple number sets based on config"""
+        sets = []
+        for _ in range(self.config['output']['sets_to_generate']):
+            if strategy == 'balanced':
+                hot = self.get_temperature_stats()['hot'][:3]
+                cold = self.get_temperature_stats()['cold'][:2]
+                remaining = self.config['strategy']['numbers_to_select'] - len(hot) - len(cold)
+                random_nums = np.random.choice(
+                    [n for n in self.number_pool if n not in hot + cold],
+                    size=remaining,
+                    replace=False
+                )
+                sets.append(sorted(hot + cold + random_nums.tolist()))
+            
+            elif strategy == 'frequent':
+                top_n = self.config['strategy']['numbers_to_select']
+                freqs = self.get_frequencies()
+                sets.append(freqs.head(top_n).index.tolist())
         
-        if strategy == 'balanced':
-            hot = temps['hot'][:3]
-            cold = temps['cold'][:2]
-            random = np.random.choice(
-                range(1, self.config['strategy']['number_pool'] + 1),
-                size=self.config['strategy']['numbers_to_select'] - len(hot) - len(cold),
-                replace=False
-            )
-            return [sorted(hot + cold + random.tolist())]
-        
-        elif strategy == 'frequent':
-            return [freqs.head(self.config['strategy']['numbers_to_select']).index.tolist()]
-        
-        else:
-            raise ValueError(f"Unknown strategy: {strategy}")
+        return sets
 
+#===================
+# end set generator
+#===================
     def save_results(self, sets: List[List[int]]) -> str:
         """Save generated sets to CSV"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
