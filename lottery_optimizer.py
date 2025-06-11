@@ -360,51 +360,64 @@ def load_config(config_path: str = 'config.yaml') -> Dict:
 
 def main():
     parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
-    parser.add_argument('--config', default='config.yaml', help='Configuration file')
-    parser.add_argument('--strategy', default='balanced', choices=['balanced', 'frequent'], 
-                       help='Number generation strategy')
-    parser.add_argument('--no-dashboard', action='store_true', 
-                       help='Disable dashboard generation')
+    parser.add_argument('--config', default='config.yaml')
+    parser.add_argument('--strategy', default='balanced', choices=['balanced', 'frequent'])
+    parser.add_argument('--no-dashboard', action='store_true', help='Disable dashboard generation')
+    parser.add_argument('--quiet', action='store_true', help='Suppress console output')
     args = parser.parse_args()
     
     try:
-        # Initialize
+        # Initialize analyzer
         config = load_config(args.config)
         analyzer = LotteryAnalyzer(config)
+        
+        # Load and validate data
         analyzer.load_data()
         
-        # Generate number sets
+        # Get analysis results
+        freqs = analyzer.get_frequencies()
+        temps = analyzer.get_temperature_stats()
         sets = analyzer.generate_sets(args.strategy)
-        saved_path = analyzer.save_results(sets)
-        print(f"📊 Results saved to: {saved_path}")
         
-        # Dashboard generation (enabled by default)
+        # Console output (unless --quiet)
+        if not args.quiet:
+            print("\n" + "="*50)
+            print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
+            print("\n🔢 Top 10 Frequent Numbers:")
+            print(freqs.to_string())
+            
+            print("\n🔥 Hot Numbers (last {} days):".format(
+                config['analysis']['hot_days']))
+            print(", ".join(map(str, temps['hot'])))
+            
+            print("\n❄️ Cold Numbers (not seen in {} days):".format(
+                config['analysis']['cold_threshold']))
+            print(", ".join(map(str, temps['cold'])))
+            
+            print("\n🎰 Recommended Number Sets:")
+            for i, nums in enumerate(sets, 1):
+                print(f"Set {i}: {'-'.join(map(str, nums))}")
+            print("\n" + "="*50)
+
+        # Save files
+        results_path = analyzer.save_results(sets)
+        if not args.quiet:
+            print(f"\n💾 Results saved to: {results_path}")
+        
+        # Generate dashboard (unless --no-dashboard)
         if not args.no_dashboard:
             dashboard = DashboardGenerator(analyzer)
-            
-            # Prepare dashboard data
-            freqs = analyzer.get_frequencies().reset_index()
-            data = {
-                'frequencies': {
-                    'num': freqs['num'].tolist(),
-                    'frequency': freqs['frequency'].tolist()
-                },
-                'hot': analyzer.get_temperature_stats()['hot'],
-                'cold': analyzer.get_temperature_stats()['cold'],
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            # dashboard_path = dashboard.generate(data)
             dashboard_path = dashboard.generate()
-            print(f"🌐 Dashboard generated at: {dashboard_path}")
-            print(f"   Serve with: python -m http.server --directory {dashboard.dashboard_dir} 8000")
-            
+            if not args.quiet:
+                print(f"🌐 Dashboard generated at: {dashboard_path}")
+                print("   View with: python -m http.server --directory results/dashboard 8000")
+    
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        print("Troubleshooting:")
-        print("1. Check config.yaml exists")
-        print("2. Verify historical.csv format")
-        print(f"3. Ensure numbers are 1-{config.get('strategy',{}).get('number_pool',55)}")
+        print(f"\n❌ Error: {str(e)}")
+        print("\nTroubleshooting:")
+        print(f"1. Check {args.config} exists and is valid")
+        print(f"2. Verify data/numbers are 1-{config.get('strategy',{}).get('number_pool',55)}")
+        print("3. Ensure CSV format: date,n1-n2-n3-n4-n5-n6")
 
 if __name__ == "__main__":
     main()
