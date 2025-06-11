@@ -52,6 +52,7 @@ DEFAULT_CONFIG = {
 class LotteryAnalyzer:
     def __init__(self, config: Dict):
         self.config = config
+        self._validate_config() 
         # Add validation
         if 'sets_to_generate' not in self.config['output']:
             self.config['output']['sets_to_generate'] = 4
@@ -64,6 +65,26 @@ class LotteryAnalyzer:
         self._init_mode_handler()  # Add this line
         self.conn = self._init_db()
         self._prepare_filesystem()
+
+    # ======================
+    # NEW CONFIG VALIDATION
+    # ======================
+    def _validate_config(self):
+        """Validate combination analysis config"""
+        if 'combination_analysis' not in self.config['analysis']:
+            return
+            
+        valid_sizes = {'pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'}
+        invalid = [
+            size for size in self.config['analysis']['combination_analysis']
+            if size not in valid_sizes
+        ]
+        
+        if invalid:
+            raise ValueError(
+                f"Invalid combination_analysis keys: {invalid}. "
+                f"Valid options are: {valid_sizes}"
+            )
 
     def _init_db(self) -> sqlite3.Connection:
         """Initialize SQLite database with optimized schema"""
@@ -288,6 +309,26 @@ class DashboardGenerator:
         self.dashboard_dir = Path(analyzer.config['data']['results_dir']) / "dashboard"
         self.dashboard_dir.mkdir(exist_ok=True)
 
+    # ======================
+    # NEW SAFE PARSER METHOD
+    # ======================
+    def _parse_combo_size(self, size_name: str) -> int:
+        """Convert 'triplets' → 3 with validation"""
+        size_map = {
+            'pairs': 2,
+            'triplets': 3,
+            'quadruplets': 4,
+            'quintuplets': 5,
+            'sixtuplets': 6
+        }
+        size_name = size_name.lower().strip()
+        if size_name not in size_map:
+            raise ValueError(
+                f"Invalid combo size '{size_name}'. "
+                f"Must be one of: {list(size_map.keys())}"
+            )
+        return size_map[size_name]
+
     def _generate_number_card(self, title: str, numbers: list, color_class: str) -> str:
         """Generate a card with number bubbles"""
         numbers_html = "".join(
@@ -378,11 +419,17 @@ class DashboardGenerator:
             self._generate_recent_draws()
         ]
         # ADD THIS NEW BLOCK FOR COMBINATION CHARTS
-        combo_config = self.analyzer.config['analysis']['combination_analysis']
-        for size, enabled in combo_config.items():
-            if enabled and size.endswith('lets'):
-                size_num = int(size[0])  # Extract number from "pairs", "triplets" etc.
-                cards.append(self._generate_combination_chart(size_num))
+        combo_config = self.analyzer.config['analysis'].get('combination_analysis', {})
+        for size_name, enabled in combo_config.items():
+            try:
+                if enabled:
+                    size_num = self._parse_combo_size(size_name)  # Use the safe parser
+                    cards.append(self._generate_combination_chart(size_num))
+            except (ValueError, KeyError) as e:
+                import logging
+                logging.warning(f"Skipping invalid combo size '{size_name}': {str(e)}")
+                
+                
         # Complete HTML
         html = f"""
         <!DOCTYPE html>
