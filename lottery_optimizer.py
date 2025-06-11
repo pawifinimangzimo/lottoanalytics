@@ -48,6 +48,12 @@ class LotteryAnalyzer:
         if 'sets_to_generate' not in self.config['output']:
             self.config['output']['sets_to_generate'] = 4
         # Rest of your init code
+        #number pool initialization
+        self.number_pool = list(range(1, config['strategy']['number_pool'] + 1))
+        self.weights = pd.Series(1.0, index=self.number_pool) 
+        #number pool initialization end 
+        #mode handler 
+        self._init_mode_handler()  # Add this line
         self.conn = self._init_db()
         self._prepare_filesystem()
 
@@ -191,7 +197,49 @@ class LotteryAnalyzer:
         }).to_csv(path, index=False)
         
         return str(path)
+#==============================
+# Mode Handler 
+#===============================
 
+    def _init_mode_handler(self):
+        """Initialize the mode handling system"""
+        self.mode = self.config.get('mode', 'auto')
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights based on current mode"""
+        if self.mode == 'auto':
+            # Auto-mode defaults
+            self.weights = pd.Series(1.0, index=self.number_pool)
+            self.learning_rate = self.config.get('auto', {}).get('learning_rate', 0.01)
+            self.decay_factor = self.config.get('auto', {}).get('decay_factor', 0.97)
+        else:
+            # Manual mode weights from config
+            weights_config = self.config.get('manual', {}).get('strategy', {}).get('weighting', {})
+            self.weights = pd.Series(
+                weights_config.get('frequency', 0.4) * self._get_frequency_weights() +
+                weights_config.get('recency', 0.3) * self._get_recent_weights() +
+                weights_config.get('randomness', 0.3) * np.random.rand(len(self.number_pool))
+            )
+            
+            # Apply cold number bonus
+            cold_bonus = weights_config.get('resurgence', 0.1)
+            cold_nums = self.get_temperature_stats()['cold']
+            self.weights[cold_nums] *= (1 + cold_bonus)
+            
+            self.weights /= self.weights.sum()
+    
+    def set_mode(self, mode: str):
+        """Change modes dynamically"""
+        valid_modes = ['auto', 'manual']
+        if mode not in valid_modes:
+            raise ValueError(f"Invalid mode. Choose from: {valid_modes}")
+        self.mode = mode
+        self._init_weights()
+
+#==============================
+#End mode handler
+#=============================
 # ======================
 # DASHBOARD GENERATOR
 # ======================
@@ -371,6 +419,8 @@ def load_config(config_path: str = 'config.yaml') -> Dict:
 
 def main():
     parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
+    parser.add_argument('--mode', choices=['auto', 'manual'], 
+                       help='Override config mode setting')
     parser.add_argument('--config', default='config.yaml')
     parser.add_argument('--strategy', default='balanced', choices=['balanced', 'frequent'])
     parser.add_argument('--no-dashboard', action='store_true', help='Disable dashboard generation')

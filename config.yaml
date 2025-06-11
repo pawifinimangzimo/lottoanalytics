@@ -57,3 +57,21 @@ analysis:
     quintuplets: true
     sixtuplets: true 
   min_combination_count: 2
+ 
+ # Add these new sections (keep existing ones)
+mode: auto  # New root-level option
+
+auto:  # New section
+  learning_rate: 0.01
+  decay_factor: 0.97
+
+manual:  # New section
+  strategy:
+    weighting:
+      frequency: 0.4
+      recency: 0.3
+      randomness: 0.3
+      resurgence: 0.1
+    presets:
+      balanced: [0.4, 0.3, 0.2, 0.1]
+      anti_pattern: [0.1, 0.1, 0.8, 0.3]
