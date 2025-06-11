@@ -30,7 +30,15 @@ DEFAULT_CONFIG = {
     'analysis': {
         'hot_days': 30,
         'cold_threshold': 60,
-        'top_n_results': 10
+        'top_range': 10,  # Now using top_range instead of top_n_results
+        'min_display_matches': 1,
+        'combination_analysis': {
+            'pairs': True,
+            'triplets': True,
+            'quadruplets': False,
+            'quintuplets': False,
+            'sixtuplets': False
+        }
     },
     'strategy': {
         'numbers_to_select': 6,
@@ -111,8 +119,9 @@ class LotteryAnalyzer:
         except Exception as e:
             raise ValueError(f"Data loading failed: {str(e)}")
 
-    def get_frequencies(self) -> pd.Series:
+    def get_frequencies(self, count: int = None) -> pd.Series:  # UPDATE METHOD SIGNATURE
         """Get number frequencies using optimized SQL query"""
+        top_n = count or self.config['analysis']['top_range']  # USE CONFIG VALUE
         query = """
             WITH nums AS (
                 SELECT n1 AS num FROM draws UNION ALL
@@ -128,10 +137,33 @@ class LotteryAnalyzer:
             ORDER BY frequency DESC
             LIMIT ?
         """
-        return pd.read_sql(
-            query, self.conn, 
-            params=(self.config['analysis']['top_n_results'],)
-        )
+        return pd.read_sql(query, self.conn, params=(top_n,))
+
+# ======================
+# COMBINATION ANALYSIS 
+# ======================
+    def get_combinations(self, size: int) -> pd.DataFrame:
+        """Get frequency of number combinations"""
+        top_n = self.config['analysis']['top_range']
+        
+        cols = [f'n{i}' for i in range(1, self.config['strategy']['numbers_to_select'] + 1)]
+        combo_cols = list(combinations(cols, size))
+        
+        queries = []
+        for combo in combo_cols:
+            select_cols = ', '.join(combo)
+            group_cols = ', '.join(combo)
+            queries.append(f"""
+                SELECT {select_cols}, COUNT(*) as frequency
+                FROM draws
+                GROUP BY {group_cols}
+                ORDER BY frequency DESC
+                LIMIT {top_n}
+            """)
+        
+        full_query = "\nUNION ALL\n".join(queries)
+        return pd.read_sql(full_query, self.conn)
+
 
     def get_temperature_stats(self) -> Dict[str, List[int]]:
         """Classify numbers as hot/cold using SQL"""
@@ -268,15 +300,40 @@ class DashboardGenerator:
             <div class="number-grid">{numbers_html}</div>
         </div>
         """
+#==============
+#New Chart 
+#==============
 
-    def _generate_frequency_chart(self, frequencies: pd.Series) -> str:
-        """Generate the frequency chart HTML"""
-        top_numbers = frequencies.head(10).index.tolist()
-        counts = frequencies.head(10).values.tolist()
+    def _generate_combination_chart(self, size: int) -> str:
+        """Generate combination frequency chart"""
+        top_n = self.analyzer.config['analysis']['top_range']
+        combos = self.analyzer.get_combinations(size)
+        
+        labels = [f"{'-'.join(map(str, row[:-1]))}" for _, row in combos.iterrows()]
+        counts = combos['frequency'].tolist()
         
         return f"""
         <div class="chart-card">
-            <h3>Top 10 Frequent Numbers</h3>
+            <h3>Top {top_n} {size}-Number Combinations</h3>
+            <div class="chart-container">
+                <canvas id="comboChart{size}"></canvas>
+            </div>
+            <div class="chart-data" hidden>
+                {json.dumps({"combinations": labels, "counts": counts})}
+            </div>
+        </div>
+        """
+
+#===================
+    def _generate_frequency_chart(self, frequencies: pd.Series) -> str:
+        """Generate the frequency chart HTML"""
+        top_n = self.analyzer.config['analysis']['top_range']  # USE CONFIG VALUE
+        top_numbers = frequencies.head(top_n).index.tolist()
+        counts = frequencies.head(top_n).values.tolist()
+        
+        return f"""
+        <div class="chart-card">
+            <h3>Top {top_n} Frequent Numbers</h3>  <!-- DYNAMIC TITLE -->
             <div class="chart-container">
                 <canvas id="frequencyChart"></canvas>
             </div>
@@ -320,7 +377,12 @@ class DashboardGenerator:
             self._generate_frequency_chart(freqs),
             self._generate_recent_draws()
         ]
-        
+        # ADD THIS NEW BLOCK FOR COMBINATION CHARTS
+        combo_config = self.analyzer.config['analysis']['combination_analysis']
+        for size, enabled in combo_config.items():
+            if enabled and size.endswith('lets'):
+                size_num = int(size[0])  # Extract number from "pairs", "triplets" etc.
+                cards.append(self._generate_combination_chart(size_num))
         # Complete HTML
         html = f"""
         <!DOCTYPE html>
