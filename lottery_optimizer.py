@@ -161,10 +161,16 @@ class LotteryAnalyzer:
 # Start Set generator
 #======================
 
-    def generate_sets(self, strategy: str = 'balanced') -> List[List[int]]:
-        """Generate multiple number sets based on config"""
+    def generate_sets(self, strategy: str = None) -> List[List[int]]:
+        """Generate sets using current mode"""
+        strategy = strategy or self.config.get('strategy', {}).get('default_strategy', 'balanced')
+        num_sets = self.config['output'].get('sets_to_generate', 4)
+        
         sets = []
-        for _ in range(self.config['output']['sets_to_generate']):
+        for _ in range(num_sets):
+            if self.mode == 'auto':
+                # Auto-mode generates fresh weights each time
+                self._init_weights()
             if strategy == 'balanced':
                 hot = self.get_temperature_stats()['hot'][:3]
                 cold = self.get_temperature_stats()['cold'][:2]
