@@ -206,7 +206,7 @@ class LotteryAnalyzer:
                 SELECT {select_cols}, COUNT(*) as frequency
                 FROM draws
                 GROUP BY {select_cols}
-                HAVING frequency >= {min_count}  # CRITICAL FILTER
+                HAVING frequency >= {min_count}  
             """)
         
         full_query = " UNION ALL ".join(queries)
