@@ -652,8 +652,6 @@ def main():
 #==================
 # New Section
 #==================
-
-        if not args.quiet:
             print("\n🔢 Top Combinations:")
             combo_config = analyzer.config['analysis']['combination_analysis']
             
