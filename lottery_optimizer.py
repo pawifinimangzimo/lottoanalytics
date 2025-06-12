@@ -334,9 +334,132 @@ class LotteryAnalyzer:
         self.mode = mode
         self._init_weights()
 
+
 #==============================
 #End mode handler
 #=============================
+
+    def _is_prime(self, n: int) -> bool:
+        """Helper method to check if a number is prime"""
+        if n < 2:
+            return False
+        if n in (2, 3):
+            return True
+        if n % 2 == 0:
+            return False
+        for i in range(3, int(n**0.5) + 1, 2):
+            if n % i == 0:
+                return False
+        return True
+
+    def detect_patterns(self) -> Dict:
+        """Analyze historical draws for common number patterns.
+        Returns: {
+            'consecutive': float (percentage),
+            'same_ending': float,
+            'all_even_odd': float,
+            'avg_primes': float,
+            'prime_count': list[int]
+        }
+        """
+        # Feature gate check
+        if not self.config.get('features', {}).get('enable_pattern_analysis', False):
+            return {}
+
+        try:
+            # Get last 100 draws (configurable amount)
+            limit = self.config.get('pattern_settings', {}).get('sample_size', 100)
+            query = f"""
+                SELECT n1, n2, n3, n4, n5, n6 FROM draws
+                ORDER BY date DESC
+                LIMIT {limit}
+            """
+            recent = pd.read_sql(query, self.conn)
+            
+            # Initialize counters
+            patterns = {
+                'consecutive': 0,
+                'same_ending': 0,
+                'all_even_odd': 0,
+                'prime_count': []
+            }
+
+            for _, row in recent.iterrows():
+                nums = sorted(row.tolist())
+                diffs = [nums[i+1] - nums[i] for i in range(5)]
+                
+                # Check for consecutive numbers
+                if any(d == 1 for d in diffs):
+                    patterns['consecutive'] += 1
+                    
+                # Check for same last digits
+                last_digits = [n % 10 for n in nums]
+                if len(set(last_digits)) < 3:  # At least 3 numbers share digit
+                    patterns['same_ending'] += 1
+                    
+                # Check all even or all odd
+                if all(n % 2 == 0 for n in nums) or all(n % 2 == 1 for n in nums):
+                    patterns['all_even_odd'] += 1
+                    
+                # Count prime numbers
+                primes = [n for n in nums if self._is_prime(n)]
+                patterns['prime_count'].append(len(primes))
+            
+            # Convert to percentages
+            total_draws = len(recent)
+            if total_draws > 0:
+                patterns['consecutive'] = (patterns['consecutive'] / total_draws) * 100
+                patterns['same_ending'] = (patterns['same_ending'] / total_draws) * 100
+                patterns['all_even_odd'] = (patterns['all_even_odd'] / total_draws) * 100
+                patterns['avg_primes'] = np.mean(patterns['prime_count']) if patterns['prime_count'] else 0
+                
+            return patterns
+
+        except Exception as e:
+            logging.warning(f"Pattern detection failed: {str(e)}")
+            return {}
+
+
+########################
+
+    def get_combination_stats(self, size: int) -> Dict:
+        """Get statistics for number combinations of given size."""
+        if not self.config.get('features', {}).get('enable_combo_stats', False):
+            return {}
+
+        try:
+            combos = self.get_combinations(size, verbose=False)
+            if combos.empty:
+                return {}
+
+            stats = {
+                'most_common': combos.iloc[0].to_dict(),
+                'least_common': combos.iloc[-1].to_dict(),
+                'avg_frequency': combos['frequency'].mean(),
+                'std_dev': combos['frequency'].std(),
+                'coverage': len(combos) / len(list(combinations(self.number_pool, size)))
+            }
+
+            co_occurrence = defaultdict(int)
+            for _, row in combos.iterrows():
+                for i in range(1, size+1):
+                    num = row[f'n{i}']
+                    co_occurrence[num] += 1
+            
+            stats['top_co_occurring'] = sorted(
+                co_occurrence.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+
+            return stats
+
+        except Exception as e:
+            logging.warning(f"Combination stats failed for size {size}: {str(e)}")
+            return {}
+
+########################
+
 # ======================
 # DASHBOARD GENERATOR
 # ======================
@@ -589,7 +712,10 @@ def main():
     parser.add_argument('--hide-combos', nargs='+',
                        choices=['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'],
                        help="Override config to hide specific combinations")
-
+    parser.add_argument('--show-patterns', action='store_true',
+                       help='Enable pattern detection analysis')
+    parser.add_argument('--show-stats', action='store_true',
+                       help='Enable combination statistics')
 #=============
 
     args = parser.parse_args()
@@ -662,6 +788,26 @@ def main():
                         for _, row in combos.iterrows():
                             nums = [str(row[f'n{i}']) for i in range(1, size+1)]
                             print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
+
+        # ===== NEW FEATURE OUTPUTS =====
+        if args.show_patterns or config['features'].get('enable_pattern_analysis'):
+            patterns = analyzer.detect_patterns()
+            if patterns:
+                print("\n" + "="*50)
+                print(" NUMBER PATTERNS ".center(50, "="))
+                print(f"Consecutive numbers: {patterns['consecutive']:.1f}%")
+                print(f"Same last digit: {patterns['same_ending']:.1f}%")
+                print(f"All even/odd: {patterns['all_even_odd']:.1f}%")
+                print(f"Avg primes: {patterns['avg_primes']:.1f}")
+
+        if args.show_stats or config['features'].get('enable_combo_stats'):
+            stats = analyzer.get_combination_stats(2)  # For pairs
+            if stats:
+                print("\n" + "="*50)
+                print(" COMBO STATISTICS ".center(50, "="))
+                print(f"Avg frequency: {stats['avg_frequency']:.1f}")
+                print(f"Most common: {stats['most_common']}")
+        # ===== END NEW OUTPUTS =====
 
 #==================
             print("\n🎰 Recommended Number Sets:")
