@@ -17,6 +17,7 @@ from itertools import combinations
 from datetime import datetime
 import argparse
 from typing import Dict, List, Tuple
+import logging
 
 # ======================
 # DEFAULT CONFIGURATION
@@ -163,18 +164,27 @@ class LotteryAnalyzer:
 # ======================
 # COMBINATION ANALYSIS 
 # ======================
-    def get_combinations(self, size: int = 2) -> pd.DataFrame:
+
+    def get_combinations(self, size: int = 2, verbose: bool = True) -> pd.DataFrame:
         """Get frequency of number combinations with proper SQL ordering.
         Args:
             size: 2 for pairs, 3 for triplets, etc. (default=2)
+            verbose: Whether to print status messages (default=True)
         Returns:
             DataFrame with columns [nX, nY, ..., frequency]
         """
-        # ====== ADD THIS CHECK ======
+        # ====== MODIFIED CHECK WITH MESSAGING ======
         combo_type = {2: 'pairs', 3: 'triplets', 4: 'quadruplets', 5: 'quintuplets', 6: 'sixtuplets'}.get(size)
-        if not combo_type or not self.config['analysis']['combination_analysis'].get(combo_type, False):
-            return pd.DataFrame()  # Return empty if disabled in config
-        # ===========================
+        if not combo_type:
+            if verbose:
+                print(f"⚠️  Invalid combination size: {size} (must be 2-6)")
+            return pd.DataFrame()
+        
+        if not hasattr(self, 'config') or not self.config['analysis']['combination_analysis'].get(combo_type, False):
+            if verbose:
+                print(f"ℹ️  {combo_type.capitalize()} analysis disabled in config")
+            return pd.DataFrame()
+        # ===========================================
         
         if not isinstance(size, int) or size < 2 or size > 6:
             raise ValueError("Combination size must be integer between 2-6")
@@ -200,10 +210,20 @@ class LotteryAnalyzer:
         full_query = "\nUNION ALL\n".join(queries)
         full_query += f"\nORDER BY frequency DESC\nLIMIT {top_n}"
         
+        # ====== ADDED EXECUTION FEEDBACK ======
+        if verbose:
+            print(f"🔍 Analyzing {combo_type}...", end=' ', flush=True)
+        
         try:
-            return pd.read_sql(full_query, self.conn)
+            result = pd.read_sql(full_query, self.conn)
+            if verbose:
+                print(f"found {len(result)} combinations")
+            return result
         except sqlite3.Error as e:
+            if verbose:
+                print("failed")
             raise RuntimeError(f"SQL query failed: {str(e)}")
+        # ======================================
 
     def get_temperature_stats(self) -> Dict[str, List[int]]:
         """Classify numbers as hot/cold using SQL"""
