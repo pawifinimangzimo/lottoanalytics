@@ -809,13 +809,15 @@ def main():
                 print(f"All even/odd: {patterns['all_even_odd']:.1f}%")
                 print(f"Avg primes: {patterns['avg_primes']:.1f}")
 
-        if args.show_stats or config['features'].get('enable_combo_stats'):
-            stats = analyzer.get_combination_stats(2)  # For pairs
-            if stats:
-                print("\n" + "="*50)
-                print(" COMBO STATISTICS ".center(50, "="))
-                print(f"Avg frequency: {stats['average_frequency']:.1f}")
-                print(f"Most common: {stats['most_common']}")
+        if 'stats' in feature_results:
+            print("\n" + "="*50)
+            print(" COMBINATION STATISTICS ".center(50, "="))
+            for size, stats in feature_results['stats'].items():
+                if stats:
+                    print(f"\n▶ {size}-Number Combinations:")
+                    print(f"  Average appearances: {stats['average_frequency']:.1f}")
+                    print(f"  Most frequent: {'-'.join(map(str, stats['most_common']['numbers']))} "
+                          f"(appeared {stats['most_common']['count']} times)")
         # ===== END NEW OUTPUTS =====
 
 #==================
