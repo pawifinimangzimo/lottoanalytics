@@ -636,7 +636,8 @@ def main():
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
-            print("\n🔢 Top 10 Frequent Numbers:")
+            top_range = self.config['analysis']['top_range']
+            print(f"\n🔢 Top {top_range} Frequent Numbers:")
             print(freqs.to_string())
             
             print("\n🔥 Hot Numbers (last {} days):".format(
