@@ -809,15 +809,15 @@ def main():
                 print(f"All even/odd: {patterns['all_even_odd']:.1f}%")
                 print(f"Avg primes: {patterns['avg_primes']:.1f}")
 
-        if 'stats' in feature_results:
-            print("\n" + "="*50)
-            print(" COMBINATION STATISTICS ".center(50, "="))
-            for size, stats in feature_results['stats'].items():
-                if stats:
-                    print(f"\n▶ {size}-Number Combinations:")
-                    print(f"  Average appearances: {stats['average_frequency']:.1f}")
-                    print(f"  Most frequent: {'-'.join(map(str, stats['most_common']['numbers']))} "
-                          f"(appeared {stats['most_common']['count']} times)")
+
+                print("\n" + "="*50)
+                print(" COMBINATION STATISTICS ".center(50, "="))
+                for size, stats in feature_results['stats'].items():
+                    if stats:
+                        print(f"\n▶ {size}-Number Combinations:")
+                        print(f"  Average appearances: {stats['average_frequency']:.1f}")
+                        print(f"  Most frequent: {'-'.join(map(str, stats['most_common']['numbers']))} "
+                              f"(appeared {stats['most_common']['count']} times)")
         # ===== END NEW OUTPUTS =====
 
 #==================
