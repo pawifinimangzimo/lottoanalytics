@@ -623,20 +623,18 @@ def main():
 #================
         
         analyzer = LotteryAnalyzer(config)
-        
         # Load and validate data
         analyzer.load_data()
-        
+
         # Get analysis results
         freqs = analyzer.get_frequencies()
         temps = analyzer.get_temperature_stats()
         sets = analyzer.generate_sets(args.strategy)
-        
+        top_range = self.analyzer.config['analysis']['top_range']
         # Console output (unless --quiet)
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
-            top_range = self.config['analysis']['top_range']
             print(f"\n🔢 Top {top_range} Frequent Numbers:")
             print(freqs.to_string())
             
