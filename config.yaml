@@ -53,6 +53,8 @@ analysis:
   show_combined_stats: true
   top_range: 10
   combination_analysis:
+    pairs: true
+    triplets: true
     quadruplets: true
     quintuplets: true
     sixtuplets: true 

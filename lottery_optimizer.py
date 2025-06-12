@@ -170,6 +170,12 @@ class LotteryAnalyzer:
         Returns:
             DataFrame with columns [nX, nY, ..., frequency]
         """
+        # ====== ADD THIS CHECK ======
+        combo_type = {2: 'pairs', 3: 'triplets', 4: 'quadruplets', 5: 'quintuplets', 6: 'sixtuplets'}.get(size)
+        if not combo_type or not self.config['analysis']['combination_analysis'].get(combo_type, False):
+            return pd.DataFrame()  # Return empty if disabled in config
+        # ===========================
+        
         if not isinstance(size, int) or size < 2 or size > 6:
             raise ValueError("Combination size must be integer between 2-6")
 
