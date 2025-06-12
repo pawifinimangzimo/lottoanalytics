@@ -767,14 +767,14 @@ def main():
         sets = analyzer.generate_sets(args.strategy)
         top_range = analyzer.config['analysis']['top_range']
         
-        # Initialize feature_results dictionary
-        feature_results = {
-            'patterns': analyzer.detect_patterns() if (analyzer.should_run('patterns') and not args.no_patterns) else None,
-            'stats': {
-                2: analyzer.get_combination_stats(2) if (analyzer.should_run('stats') and not args.no_stats) else None,
-                3: analyzer.get_combination_stats(3) if (analyzer.should_run('stats') and not args.no_stats) else None
-            }
+    # Initialize feature_results dictionary
+    feature_results = {
+        'patterns': analyzer.detect_patterns() if (analyzer.should_run('patterns') and not args.no_patterns) else None,
+        'stats': {
+            2: analyzer.get_combination_stats(2) if (analyzer.should_run('stats') and not args.no_stats) else None,
+            3: analyzer.get_combination_stats(3) if (analyzer.should_run('stats') and not args.no_stats) else None
         }
+    }
         
         # Console output (unless --quiet)
         if not args.quiet:
