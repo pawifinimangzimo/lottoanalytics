@@ -572,6 +572,20 @@ def load_config(config_path: str = 'config.yaml') -> Dict:
         return DEFAULT_CONFIG
 
 def main():
+#=============
+# New Section
+#=============
+
+    parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
+    # Keep existing arguments...
+    parser.add_argument('--show-combos', nargs='+', 
+                       choices=['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'],
+                       help="Override config to show specific combinations (e.g., --show-combos pairs triplets)")
+    parser.add_argument('--hide-combos', nargs='+',
+                       choices=['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'],
+                       help="Override config to hide specific combinations")
+
+#=============
     parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
     parser.add_argument('--mode', choices=['auto', 'manual'], 
                        help='Override config mode setting')
@@ -584,6 +598,28 @@ def main():
     try:
         # Initialize analyzer
         config = load_config(args.config)
+#================
+# New section
+#================
+
+        # Apply CLI overrides to combination analysis
+        if args.show_combos or args.hide_combos:
+            # Initialize if missing
+            config['analysis']['combination_analysis'] = config.get('analysis', {}).get('combination_analysis', {})
+            
+            # Set all to False first if --show-combos is used (to enforce exclusivity)
+            if args.show_combos:
+                for combo in ['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets']:
+                    config['analysis']['combination_analysis'][combo] = False
+            
+            # Apply CLI selections
+            for combo in (args.show_combos or []):
+                config['analysis']['combination_analysis'][combo] = True
+            for combo in (args.hide_combos or []):
+                config['analysis']['combination_analysis'][combo] = False
+
+#================
+        
         analyzer = LotteryAnalyzer(config)
         
         # Load and validate data
@@ -613,7 +649,26 @@ def main():
             for i, nums in enumerate(sets, 1):
                 print(f"Set {i}: {'-'.join(map(str, nums))}")
             print("\n" + "="*50)
+#==================
+# New Section
+#==================
 
+        if not args.quiet:
+            print("\n🔢 Top Combinations:")
+            combo_config = analyzer.config['analysis']['combination_analysis']
+            
+            for size, size_name in [(2, 'pairs'), (3, 'triplets'), 
+                                   (4, 'quadruplets'), (5, 'quintuplets'), 
+                                   (6, 'sixtuplets')]:
+                if combo_config.get(size_name, False):
+                    combos = analyzer.get_combinations(size)
+                    if not combos.empty:
+                        print(f"\nTop {len(combos)} {size_name}:")
+                        for _, row in combos.iterrows():
+                            nums = [str(row[f'n{i}']) for i in range(1, size+1)]
+                            print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
+
+#==================
         # Save files
         results_path = analyzer.save_results(sets)
         if not args.quiet:
