@@ -647,10 +647,6 @@ def main():
                 config['analysis']['cold_threshold']))
             print(", ".join(map(str, temps['cold'])))
             
-            print("\n🎰 Recommended Number Sets:")
-            for i, nums in enumerate(sets, 1):
-                print(f"Set {i}: {'-'.join(map(str, nums))}")
-            print("\n" + "="*50)
 #==================
 # New Section
 #==================
@@ -669,6 +665,10 @@ def main():
                             print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
 
 #==================
+            print("\n🎰 Recommended Number Sets:")
+            for i, nums in enumerate(sets, 1):
+                print(f"Set {i}: {'-'.join(map(str, nums))}")
+            print("\n" + "="*50)
         # Save files
         results_path = analyzer.save_results(sets)
         if not args.quiet:
