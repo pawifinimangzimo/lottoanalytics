@@ -198,7 +198,6 @@ class LotteryAnalyzer:
         
         if verbose:
             print(f"🔍 Analyzing {combo_type} (min {min_count} appearances)...", end=' ', flush=True)
-
         # ====== QUERY GENERATION ======
         queries = []
         for combo in combinations(cols, size):
@@ -213,7 +212,6 @@ class LotteryAnalyzer:
         full_query = " UNION ALL ".join(queries)
         full_query += f"\nORDER BY frequency DESC\nLIMIT {top_n}"
 
-        # ====== EXECUTION ======
         try:
             result = pd.read_sql(full_query, self.conn)
             if verbose:
