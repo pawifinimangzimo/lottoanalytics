@@ -630,7 +630,7 @@ def main():
         freqs = analyzer.get_frequencies()
         temps = analyzer.get_temperature_stats()
         sets = analyzer.generate_sets(args.strategy)
-        top_range = self.analyzer.config['analysis']['top_range']
+        top_range = analyzer.config['analysis']['top_range']
         # Console output (unless --quiet)
         if not args.quiet:
             print("\n" + "="*50)
