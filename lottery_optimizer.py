@@ -814,7 +814,7 @@ def main():
             if stats:
                 print("\n" + "="*50)
                 print(" COMBO STATISTICS ".center(50, "="))
-                print(f"Avg frequency: {stats['avg_frequency']:.1f}")
+                print(f"Avg frequency: {stats['average_frequency']:.1f}")
                 print(f"Most common: {stats['most_common']}")
         # ===== END NEW OUTPUTS =====
 
