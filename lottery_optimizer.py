@@ -173,47 +173,47 @@ class LotteryAnalyzer:
         Returns:
             DataFrame with columns [nX, nY, ..., frequency]
         """
-        # ====== MODIFIED CHECK WITH MESSAGING ======
-        combo_type = {2: 'pairs', 3: 'triplets', 4: 'quadruplets', 5: 'quintuplets', 6: 'sixtuplets'}.get(size)
+        # ====== CONFIG VALIDATION ======
+        combo_type = {2: 'pairs', 3: 'triplets', 4: 'quadruplets', 
+                      5: 'quintuplets', 6: 'sixtuplets'}.get(size)
         if not combo_type:
             if verbose:
                 print(f"⚠️  Invalid combination size: {size} (must be 2-6)")
             return pd.DataFrame()
         
-        if not hasattr(self, 'config') or not self.config['analysis']['combination_analysis'].get(combo_type, False):
+        if not hasattr(self, 'config'):
+            if verbose:
+                print("⚠️  Config not loaded - combination analysis unavailable")
+            return pd.DataFrame()
+        
+        if not self.config['analysis']['combination_analysis'].get(combo_type, False):
             if verbose:
                 print(f"ℹ️  {combo_type.capitalize()} analysis disabled in config")
             return pd.DataFrame()
-        # ===========================================
-        
-        if not isinstance(size, int) or size < 2 or size > 6:
-            raise ValueError("Combination size must be integer between 2-6")
 
+        # ====== PARAMETERS ======
         top_n = self.config['analysis']['top_range']
+        min_count = self.config['analysis'].get('min_combination_count', 2)  # Default to 2 if missing
         cols = [f'n{i}' for i in range(1, self.config['strategy']['numbers_to_select'] + 1)]
         
-        # Generate all possible column combinations
-        combo_cols = list(combinations(cols, size))
-        
-        # Build individual queries
+        if verbose:
+            print(f"🔍 Analyzing {combo_type} (min {min_count} appearances)...", end=' ', flush=True)
+
+        # ====== QUERY GENERATION ======
         queries = []
-        for combo in combo_cols:
+        for combo in combinations(cols, size):
             select_cols = ', '.join(combo)
-            group_cols = ', '.join(combo)
             queries.append(f"""
                 SELECT {select_cols}, COUNT(*) as frequency
                 FROM draws
-                GROUP BY {group_cols}
+                GROUP BY {select_cols}
+                HAVING frequency >= {min_count}  # CRITICAL FILTER
             """)
         
-        # Combine with single ORDER BY
-        full_query = "\nUNION ALL\n".join(queries)
+        full_query = " UNION ALL ".join(queries)
         full_query += f"\nORDER BY frequency DESC\nLIMIT {top_n}"
-        
-        # ====== ADDED EXECUTION FEEDBACK ======
-        if verbose:
-            print(f"🔍 Analyzing {combo_type}...", end=' ', flush=True)
-        
+
+        # ====== EXECUTION ======
         try:
             result = pd.read_sql(full_query, self.conn)
             if verbose:
@@ -223,7 +223,8 @@ class LotteryAnalyzer:
             if verbose:
                 print("failed")
             raise RuntimeError(f"SQL query failed: {str(e)}")
-        # ======================================
+
+#=======================
 
     def get_temperature_stats(self) -> Dict[str, List[int]]:
         """Classify numbers as hot/cold using SQL"""
