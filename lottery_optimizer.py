@@ -423,7 +423,15 @@ class LotteryAnalyzer:
 ########################
 
     def get_combination_stats(self, size: int) -> Dict:
-        """Get statistics for number combinations of given size."""
+        """Get statistics for number combinations of given size.
+        Returns: {
+            'average_frequency': float,
+            'most_common': {'numbers': list, 'count': int},
+            'std_deviation': float,
+            'coverage_pct': float,
+            'top_co_occurring': list(tuple)
+        }
+        """
         if not self.config.get('features', {}).get('enable_combo_stats', False):
             return {}
 
@@ -432,27 +440,28 @@ class LotteryAnalyzer:
             if combos.empty:
                 return {}
 
-            stats = {
-                'most_common': combos.iloc[0].to_dict(),
-                'least_common': combos.iloc[-1].to_dict(),
-                'avg_frequency': combos['frequency'].mean(),
-                'std_dev': combos['frequency'].std(),
-                'coverage': len(combos) / len(list(combinations(self.number_pool, size)))
-            }
-
+            # Calculate co-occurrence first (existing code)
             co_occurrence = defaultdict(int)
             for _, row in combos.iterrows():
                 for i in range(1, size+1):
                     num = row[f'n{i}']
                     co_occurrence[num] += 1
-            
-            stats['top_co_occurring'] = sorted(
-                co_occurrence.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:5]
 
-            return stats
+            # Get the most common combination (modified section)
+            most_common_row = combos.iloc[0]
+            most_common_numbers = [most_common_row[f'n{i}'] for i in range(1, size+1)]
+
+            # New return format (replace the existing stats dictionary)
+            return {
+                'average_frequency': combos['frequency'].mean(),
+                'most_common': {
+                    'numbers': most_common_numbers,
+                    'count': most_common_row['frequency']
+                },
+                'std_deviation': combos['frequency'].std(),
+                'coverage_pct': (len(combos) / len(list(combinations(self.number_pool, size)))) * 100,
+                'top_co_occurring': sorted(co_occurrence.items(), key=lambda x: x[1], reverse=True)[:5]
+            }
 
         except Exception as e:
             logging.warning(f"Combination stats failed for size {size}: {str(e)}")
