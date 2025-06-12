@@ -572,12 +572,18 @@ def load_config(config_path: str = 'config.yaml') -> Dict:
         return DEFAULT_CONFIG
 
 def main():
+
+    parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
+    parser.add_argument('--mode', choices=['auto', 'manual'], 
+                       help='Override config mode setting')
+    parser.add_argument('--config', default='config.yaml')
+    parser.add_argument('--strategy', default='balanced', choices=['balanced', 'frequent'])
+    parser.add_argument('--no-dashboard', action='store_true', help='Disable dashboard generation')
+    parser.add_argument('--quiet', action='store_true', help='Suppress console output')
+
 #=============
 # New Section
 #=============
-
-    parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
-    # Keep existing arguments...
     parser.add_argument('--show-combos', nargs='+', 
                        choices=['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'],
                        help="Override config to show specific combinations (e.g., --show-combos pairs triplets)")
@@ -586,14 +592,11 @@ def main():
                        help="Override config to hide specific combinations")
 
 #=============
-    parser = argparse.ArgumentParser(description='Lottery Number Optimizer')
-    parser.add_argument('--mode', choices=['auto', 'manual'], 
-                       help='Override config mode setting')
-    parser.add_argument('--config', default='config.yaml')
-    parser.add_argument('--strategy', default='balanced', choices=['balanced', 'frequent'])
-    parser.add_argument('--no-dashboard', action='store_true', help='Disable dashboard generation')
-    parser.add_argument('--quiet', action='store_true', help='Suppress console output')
+
     args = parser.parse_args()
+
+
+
     
     try:
         # Initialize analyzer
