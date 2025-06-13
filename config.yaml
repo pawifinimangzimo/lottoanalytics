@@ -80,7 +80,7 @@ manual:  # New section
 
 features:
   enable_pattern_analysis: false  # Off by default
-  enable_combo_stats: true      # Off by default
+  enable_combo_stats: false      # Off by default
 
 pattern_settings:
   consecutive_weight: 0.3
