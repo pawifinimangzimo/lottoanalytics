@@ -767,7 +767,9 @@ def main():
         sets = analyzer.generate_sets(args.strategy)
         top_range = analyzer.config['analysis']['top_range']
         
-        # Initialize feature_results dictionary
+        # Console output (unless --quiet)
+        
+# Initialize feature_results dictionary
         feature_results = {
             'patterns': analyzer.detect_patterns() if (analyzer.should_run('patterns') and not args.no_patterns) else None,
             'stats': {
@@ -776,7 +778,6 @@ def main():
             }
         }
         
-        # Console output (unless --quiet)
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
