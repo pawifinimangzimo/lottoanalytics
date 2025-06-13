@@ -467,6 +467,31 @@ class LotteryAnalyzer:
             logging.warning(f"Combination stats failed for size {size}: {str(e)}")
             return {}
 
+    def get_combined_stats(self):
+        """Calculate cross-category statistical relationships"""
+        if not self.config['analysis'].get('show_combined_stats', False):
+            return None
+            
+        stats = {
+            'hot_frequent': self._get_hot_frequent_overlap(),
+            'pattern_corr': self._get_pattern_correlations(),
+            'coverage': self._get_coverage_stats()
+        }
+        return stats
+
+    def _get_hot_frequent_overlap(self):
+        """Calculate overlap between hot and frequent numbers"""
+        hot_nums = set(self.get_temperature_stats()['hot'])
+        freq_nums = set(self.get_frequencies(20).index.tolist())  # Top 20 frequent
+        overlap = hot_nums.intersection(freq_nums)
+        
+        return {
+            'overlap_pct': round(len(overlap)/len(hot_nums)*100,
+            'freq_multiplier': round(self.get_frequencies().loc[list(hot_nums)].mean() / 
+                              self.get_frequencies().mean(), 1)
+        }
+
+
 ########################
 
 # ======================
@@ -832,7 +857,16 @@ def main():
                         print(f"  Most frequent: {'-'.join(map(str, stats['most_common']['numbers']))} "
                             f"(appeared {stats['most_common']['count']} times)")
             # ============ END NEW OUTPUTS ============
-
+            if config['analysis'].get('show_combined_stats', False):
+                combined = analyzer.get_combined_stats()
+                if combined:
+                    print("\n" + "="*50)
+                    print(" COMBINED STATISTICAL INSIGHTS ".center(50, "="))
+                    
+                    hf = combined['hot_frequent']
+                    print(f"\n● Hot & Frequent Numbers:")
+                    print(f"   - {hf['overlap_pct']}% of hot numbers are also top frequent")
+                    print(f"   - Appear {hf['freq_multiplier']}x more often than average")
 #==================
             print("\n🎰 Recommended Number Sets:")
             for i, nums in enumerate(sets, 1):
