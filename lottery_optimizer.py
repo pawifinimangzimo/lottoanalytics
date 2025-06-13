@@ -712,9 +712,7 @@ def main():
     parser.add_argument('--no-dashboard', action='store_true', help='Disable dashboard generation')
     parser.add_argument('--quiet', action='store_true', help='Suppress console output')
 
-#=============
-# New Section
-#=============
+    # ============ INSERT NEW ARGUMENTS HERE ============
     parser.add_argument('--show-combos', nargs='+', 
                        choices=['pairs', 'triplets', 'quadruplets', 'quintuplets', 'sixtuplets'],
                        help="Override config to show specific combinations (e.g., --show-combos pairs triplets)")
@@ -725,7 +723,7 @@ def main():
                        help='Enable pattern detection analysis')
     parser.add_argument('--show-stats', action='store_true',
                        help='Enable combination statistics')
-#=============
+    # ============ END OF NEW ARGUMENTS ============
 
     args = parser.parse_args()
 
@@ -769,15 +767,19 @@ def main():
         
         # Console output (unless --quiet)
         
-# Initialize feature_results dictionary
+        # ============ INSERT FEATURE RESULTS INIT HERE ============
+        # Initialize feature_results dictionary
         feature_results = {
-            'patterns': analyzer.detect_patterns() if (analyzer.should_run('patterns') and not args.no_patterns) else None,
+            'patterns': analyzer.detect_patterns() if (args.show_patterns or 
+                     config.get('features', {}).get('enable_pattern_analysis', False)) else None,
             'stats': {
-                2: analyzer.get_combination_stats(2) if (analyzer.should_run('stats') and not args.no_stats) else None,
-                3: analyzer.get_combination_stats(3) if (analyzer.should_run('stats') and not args.no_stats) else None
+                2: analyzer.get_combination_stats(2) if (args.show_stats or 
+                    config.get('features', {}).get('enable_combo_stats', False)) else None,
+                3: analyzer.get_combination_stats(3) if (args.show_stats or 
+                    config.get('features', {}).get('enable_combo_stats', False)) else None
             }
         }
-        
+        # ============ END FEATURE RESULTS INIT ============
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
@@ -799,8 +801,8 @@ def main():
             combo_config = analyzer.config['analysis']['combination_analysis']
             
             for size, size_name in [(2, 'pairs'), (3, 'triplets'), 
-                                   (4, 'quadruplets'), (5, 'quintuplets'), 
-                                   (6, 'sixtuplets')]:
+                                 (4, 'quadruplets'), (5, 'quintuplets'), 
+                                 (6, 'sixtuplets')]:
                 if combo_config.get(size_name, False):
                     combos = analyzer.get_combinations(size)
                     if not combos.empty:
@@ -809,27 +811,27 @@ def main():
                             nums = [str(row[f'n{i}']) for i in range(1, size+1)]
                             print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
 
-        # ===== NEW FEATURE OUTPUTS =====
-        if args.show_patterns or config['features'].get('enable_pattern_analysis'):
-            patterns = analyzer.detect_patterns()
-            if patterns:
+            # ============ INSERT NEW FEATURE OUTPUTS HERE ============
+            if feature_results['patterns']:
                 print("\n" + "="*50)
                 print(" NUMBER PATTERNS ".center(50, "="))
-                print(f"Consecutive numbers: {patterns['consecutive']:.1f}%")
-                print(f"Same last digit: {patterns['same_ending']:.1f}%")
-                print(f"All even/odd: {patterns['all_even_odd']:.1f}%")
-                print(f"Avg primes: {patterns['avg_primes']:.1f}")
+                p = feature_results['patterns']
+                print(f"Consecutive numbers: {p['consecutive']:.1f}%")
+                print(f"Same last digit: {p['same_ending']:.1f}%")
+                print(f"All even/odd: {p['all_even_odd']:.1f}%")
+                print(f"Avg primes: {p['avg_primes']:.1f}")
 
-
+            if feature_results['stats'][2] or feature_results['stats'][3]:
                 print("\n" + "="*50)
                 print(" COMBINATION STATISTICS ".center(50, "="))
-                for size, stats in feature_results['stats'].items():
-                    if stats:
+                for size in [2, 3]:
+                    if feature_results['stats'][size]:
+                        stats = feature_results['stats'][size]
                         print(f"\n▶ {size}-Number Combinations:")
                         print(f"  Average appearances: {stats['average_frequency']:.1f}")
                         print(f"  Most frequent: {'-'.join(map(str, stats['most_common']['numbers']))} "
-                              f"(appeared {stats['most_common']['count']} times)")
-        # ===== END NEW OUTPUTS =====
+                            f"(appeared {stats['most_common']['count']} times)")
+            # ============ END NEW OUTPUTS ============
 
 #==================
             print("\n🎰 Recommended Number Sets:")
