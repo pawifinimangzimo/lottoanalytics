@@ -485,10 +485,14 @@ class LotteryAnalyzer:
         freq_nums = set(self.get_frequencies(20).index.tolist())  # Top 20 frequent
         overlap = hot_nums.intersection(freq_nums)
         
+        # Handle division by zero cases
+        hot_count = len(hot_nums) if hot_nums else 1
+        freq_mean = self.get_frequencies().mean()
+        hot_freq_mean = self.get_frequencies().loc[list(hot_nums)].mean() if hot_nums else 0
+        
         return {
-            'overlap_pct': round(len(overlap)/len(hot_nums)*100,
-            'freq_multiplier': round(self.get_frequencies().loc[list(hot_nums)].mean() / 
-                              self.get_frequencies().mean(), 1)
+            'overlap_pct': round(len(overlap)/hot_count*100, 1),
+            'freq_multiplier': round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
         }
 
 
