@@ -141,9 +141,9 @@ class LotteryAnalyzer:
         except Exception as e:
             raise ValueError(f"Data loading failed: {str(e)}")
 
-    def get_frequencies(self, count: int = None) -> pd.Series:  # UPDATE METHOD SIGNATURE
+    def get_frequencies(self, count: int = None) -> pd.Series:
         """Get number frequencies using optimized SQL query"""
-        top_n = count or self.config['analysis']['top_range']  # USE CONFIG VALUE
+        top_n = count or self.config['analysis']['top_range']
         query = """
             WITH nums AS (
                 SELECT n1 AS num FROM draws UNION ALL
@@ -159,7 +159,13 @@ class LotteryAnalyzer:
             ORDER BY frequency DESC
             LIMIT ?
         """
-        return pd.read_sql(query, self.conn, params=(top_n,))
+        result = pd.read_sql(query, self.conn, params=(top_n,))
+        
+        # Return empty Series if no results
+        if result.empty:
+            return pd.Series(dtype=float)
+            
+        return result.set_index('num')['frequency']
 
 # ======================
 # COMBINATION ANALYSIS 
@@ -484,12 +490,23 @@ class LotteryAnalyzer:
         """Calculate overlap between hot and frequent numbers"""
         try:
             hot_nums = set(self.get_temperature_stats()['hot'])
-            freq_nums = set(self.get_frequencies(20).index.tolist())
+            freq_df = self.get_frequencies(20)  # Get top 20 frequent numbers
+            
+            # Handle case where no frequent numbers exist
+            if freq_df.empty:
+                return {'overlap_pct': 0, 'freq_multiplier': 0}
+                
+            freq_nums = set(freq_df.index.tolist())
             overlap = hot_nums.intersection(freq_nums)
             
             hot_count = len(hot_nums) or 1  # Prevent division by zero
-            freq_mean = self.get_frequencies().mean()
-            hot_freq_mean = self.get_frequencies().loc[list(hot_nums)].mean() if hot_nums else 0
+            freq_mean = freq_df['frequency'].mean()
+            
+            # Handle case where no hot numbers are in frequent numbers
+            if not overlap:
+                return {'overlap_pct': 0, 'freq_multiplier': 0}
+                
+            hot_freq_mean = freq_df.loc[list(overlap)]['frequency'].mean()
             
             return {
                 'overlap_pct': round(len(overlap)/hot_count*100, 1),
