@@ -140,7 +140,7 @@ class LotteryAnalyzer:
             
         except Exception as e:
             raise ValueError(f"Data loading failed: {str(e)}")
-
+####################
     def get_frequencies(self, count: int = None) -> pd.Series:
         """Get number frequencies using optimized SQL query"""
         top_n = count or self.config['analysis']['top_range']
@@ -161,12 +161,12 @@ class LotteryAnalyzer:
         """
         result = pd.read_sql(query, self.conn, params=(top_n,))
         
-        # Return empty Series if no results
+        # Return empty Series with correct structure if no results
         if result.empty:
-            return pd.Series(dtype=float)
+            return pd.Series(dtype=float, name='frequency')
             
         return result.set_index('num')['frequency']
-
+##############################
 # ======================
 # COMBINATION ANALYSIS 
 # ======================
@@ -485,37 +485,42 @@ class LotteryAnalyzer:
             'pattern_corr': self._get_pattern_correlations(),
             'coverage': self._get_coverage_stats()
         }
-
-    def _get_hot_frequent_overlap(self):
+###########################
+     def _get_hot_frequent_overlap(self):
         """Calculate overlap between hot and frequent numbers"""
         try:
-            hot_nums = set(self.get_temperature_stats()['hot'])
-            freq_df = self.get_frequencies(20)  # Get top 20 frequent numbers
+            # Get hot numbers
+            temp_stats = self.get_temperature_stats()
+            hot_nums = set(temp_stats.get('hot', []))
             
-            # Handle case where no frequent numbers exist
-            if freq_df.empty:
+            # Get frequent numbers
+            freq_series = self.get_frequencies(20)  # Get top 20 frequent numbers
+            
+            # Handle empty cases
+            if not hot_nums or freq_series.empty:
                 return {'overlap_pct': 0, 'freq_multiplier': 0}
                 
-            freq_nums = set(freq_df.index.tolist())
+            freq_nums = set(freq_series.index.tolist())
             overlap = hot_nums.intersection(freq_nums)
             
             hot_count = len(hot_nums) or 1  # Prevent division by zero
-            freq_mean = freq_df['frequency'].mean()
+            freq_mean = freq_series.mean()
             
-            # Handle case where no hot numbers are in frequent numbers
-            if not overlap:
-                return {'overlap_pct': 0, 'freq_multiplier': 0}
+            # Calculate overlap statistics
+            if overlap:
+                hot_freq_mean = freq_series.loc[list(overlap)].mean()
+                multiplier = round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
+            else:
+                multiplier = 0
                 
-            hot_freq_mean = freq_df.loc[list(overlap)]['frequency'].mean()
-            
             return {
                 'overlap_pct': round(len(overlap)/hot_count*100, 1),
-                'freq_multiplier': round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
+                'freq_multiplier': multiplier
             }
         except Exception as e:
             logging.warning(f"Hot-frequent analysis failed: {str(e)}")
             return {'overlap_pct': 0, 'freq_multiplier': 0}
-
+######################################
     def _get_pattern_correlations(self):
         """Calculate pattern relationships"""
         # Implement your pattern correlation logic here
