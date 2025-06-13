@@ -486,36 +486,31 @@ class LotteryAnalyzer:
             'coverage': self._get_coverage_stats()
         }
 ###########################
-     def _get_hot_frequent_overlap(self):
+    def _get_hot_frequent_overlap(self):
         """Calculate overlap between hot and frequent numbers"""
         try:
-            # Get hot numbers
-            temp_stats = self.get_temperature_stats()
-            hot_nums = set(temp_stats.get('hot', []))
+            hot_nums = set(self.get_temperature_stats()['hot'])
+            freq_df = self.get_frequencies(20)  # Get top 20 frequent numbers
             
-            # Get frequent numbers
-            freq_series = self.get_frequencies(20)  # Get top 20 frequent numbers
-            
-            # Handle empty cases
-            if not hot_nums or freq_series.empty:
+            # Handle case where no frequent numbers exist
+            if freq_df.empty:
                 return {'overlap_pct': 0, 'freq_multiplier': 0}
                 
-            freq_nums = set(freq_series.index.tolist())
+            freq_nums = set(freq_df.index.tolist())
             overlap = hot_nums.intersection(freq_nums)
             
             hot_count = len(hot_nums) or 1  # Prevent division by zero
-            freq_mean = freq_series.mean()
+            freq_mean = freq_df['frequency'].mean()
             
-            # Calculate overlap statistics
-            if overlap:
-                hot_freq_mean = freq_series.loc[list(overlap)].mean()
-                multiplier = round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
-            else:
-                multiplier = 0
+            # Handle case where no hot numbers are in frequent numbers
+            if not overlap:
+                return {'overlap_pct': 0, 'freq_multiplier': 0}
                 
+            hot_freq_mean = freq_df.loc[list(overlap)]['frequency'].mean()
+            
             return {
                 'overlap_pct': round(len(overlap)/hot_count*100, 1),
-                'freq_multiplier': multiplier
+                'freq_multiplier': round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
             }
         except Exception as e:
             logging.warning(f"Hot-frequent analysis failed: {str(e)}")
