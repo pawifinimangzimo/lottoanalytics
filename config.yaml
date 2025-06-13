@@ -50,7 +50,7 @@ analysis:
     hot: 15    # Recent threshold
     warm: 30   # Semi-recent
     cold: 31   # Beginning of "cold" range
-  show_combined_stats: true
+  show_combined_stats: false
   top_range: 10
   combination_analysis:
     pairs: true
