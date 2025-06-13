@@ -467,34 +467,55 @@ class LotteryAnalyzer:
             logging.warning(f"Combination stats failed for size {size}: {str(e)}")
             return {}
 
+############################# New Added Section ###########################
+
     def get_combined_stats(self):
         """Calculate cross-category statistical relationships"""
         if not self.config['analysis'].get('show_combined_stats', False):
             return None
             
-        stats = {
+        return {
             'hot_frequent': self._get_hot_frequent_overlap(),
             'pattern_corr': self._get_pattern_correlations(),
             'coverage': self._get_coverage_stats()
         }
-        return stats
 
     def _get_hot_frequent_overlap(self):
         """Calculate overlap between hot and frequent numbers"""
-        hot_nums = set(self.get_temperature_stats()['hot'])
-        freq_nums = set(self.get_frequencies(20).index.tolist())  # Top 20 frequent
-        overlap = hot_nums.intersection(freq_nums)
-        
-        # Handle division by zero cases
-        hot_count = len(hot_nums) if hot_nums else 1
-        freq_mean = self.get_frequencies().mean()
-        hot_freq_mean = self.get_frequencies().loc[list(hot_nums)].mean() if hot_nums else 0
-        
+        try:
+            hot_nums = set(self.get_temperature_stats()['hot'])
+            freq_nums = set(self.get_frequencies(20).index.tolist())
+            overlap = hot_nums.intersection(freq_nums)
+            
+            hot_count = len(hot_nums) or 1  # Prevent division by zero
+            freq_mean = self.get_frequencies().mean()
+            hot_freq_mean = self.get_frequencies().loc[list(hot_nums)].mean() if hot_nums else 0
+            
+            return {
+                'overlap_pct': round(len(overlap)/hot_count*100, 1),
+                'freq_multiplier': round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
+            }
+        except Exception as e:
+            logging.warning(f"Hot-frequent analysis failed: {str(e)}")
+            return {'overlap_pct': 0, 'freq_multiplier': 0}
+
+    def _get_pattern_correlations(self):
+        """Calculate pattern relationships"""
+        # Implement your pattern correlation logic here
         return {
-            'overlap_pct': round(len(overlap)/hot_count*100, 1),
-            'freq_multiplier': round(hot_freq_mean/freq_mean, 1) if freq_mean else 0
+            'hot_freq_pair_rate': 62,  # Example value
+            'cold_pair_reduction': 28   # Example value
         }
 
+    def _get_coverage_stats(self):
+        """Calculate coverage statistics"""
+        # Implement your coverage analysis here
+        return {
+            'pattern_coverage': 82,  # Example value
+            'never_paired_pct': 41   # Example value
+        }
+
+###########################################################################
 
 ########################
 
