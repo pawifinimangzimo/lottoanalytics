@@ -358,6 +358,10 @@ class LotteryAnalyzer:
                 return False
         return True
 
+    def _get_prime_numbers(self) -> List[int]:
+        """NEW: Get all primes in number pool"""
+        return [n for n in self.number_pool if self._is_prime(n)]
+
     def detect_patterns(self) -> Dict:
         """Analyze historical draws for common number patterns.
         Returns: {
@@ -865,6 +869,8 @@ def main():
         }
         # ============ END FEATURE RESULTS INIT ============
         temp_stats = analyzer.get_temperature_stats() 
+        
+        all_primes = set(analyzer._get_prime_numbers())
         hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
         cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
             
