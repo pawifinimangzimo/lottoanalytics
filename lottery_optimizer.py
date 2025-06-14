@@ -864,6 +864,7 @@ def main():
             }
         }
         # ============ END FEATURE RESULTS INIT ============
+        temp_stats = analyzer.get_temperature_stats() 
         hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
         cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
             
