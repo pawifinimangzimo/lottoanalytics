@@ -864,8 +864,7 @@ def main():
             }
         }
         # ============ END FEATURE RESULTS INIT ============
-        hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
-        cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
+
             
         if not args.quiet:
             print("\n" + "="*50)
@@ -876,13 +875,18 @@ def main():
             print("\n🔥 Hot Numbers (last {} days):".format(
                 config['analysis']['hot_days']))
             print(", ".join(map(str, temps['hot'])))
-            print(f"   • Primes: {', '.join(map(str, hot_primes)) or 'None'}")
+            
             
             print("\n❄️ Cold Numbers (not seen in {} days):".format(
                 config['analysis']['cold_threshold']))
             print(", ".join(map(str, temps['cold'])))
-            print(f"   • Primes: {', '.join(map(str, cold_primes)) or 'None'}")
+            
 
+            hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
+            cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
+            
+            print(f"   • Primes: {', '.join(map(str, hot_primes)) or 'None'}")
+            print(f"   • Primes: {', '.join(map(str, cold_primes)) or 'None'}")
 #==================
 # New Section
 #==================
