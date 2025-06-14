@@ -424,7 +424,19 @@ class LotteryAnalyzer:
         except Exception as e:
             logging.warning(f"Pattern detection failed: {str(e)}")
             return {}
+######
 
+    def _get_prime_subsets(self, numbers: List[int]) -> List[int]:
+        """Extract primes from any number list."""
+        return [n for n in numbers if self._is_prime(n)]
+
+    def _tag_prime_combos(self, combos: pd.DataFrame, size: int) -> pd.DataFrame:
+        """Add '[All Primes]' tag to combos where all numbers are prime."""
+        primes = set(self._get_prime_numbers())
+        combos['is_prime_combo'] = combos[
+            [f'n{i}' for i in range(1, size+1)]
+        ].apply(lambda row: all(n in primes for n in row), axis=1)
+        return combos
 
 ########################
 
@@ -852,6 +864,9 @@ def main():
             }
         }
         # ============ END FEATURE RESULTS INIT ============
+        hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
+        cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
+            
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
@@ -861,11 +876,13 @@ def main():
             print("\n🔥 Hot Numbers (last {} days):".format(
                 config['analysis']['hot_days']))
             print(", ".join(map(str, temps['hot'])))
+            print(f"   • Primes: {', '.join(map(str, hot_primes)) or 'None'}")
             
             print("\n❄️ Cold Numbers (not seen in {} days):".format(
                 config['analysis']['cold_threshold']))
             print(", ".join(map(str, temps['cold'])))
-            
+            print(f"   • Primes: {', '.join(map(str, cold_primes)) or 'None'}")
+
 #==================
 # New Section
 #==================
@@ -882,6 +899,11 @@ def main():
                         for _, row in combos.iterrows():
                             nums = [str(row[f'n{i}']) for i in range(1, size+1)]
                             print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
+                        combos = analyzer._tag_prime_combos(combos, size)
+                        for _, row in combos.head(3).iterrows():
+                            nums = [str(row[f'n{i}']) for i in range(1, size+1)]
+                            prime_tag = " [All Primes]" if row['is_prime_combo'] else ""
+                            print(f"- {'-'.join(nums)} (appeared {row['frequency']} times){prime_tag}")
 
             # ============ INSERT NEW FEATURE OUTPUTS HERE ============
             if feature_results['patterns']:
