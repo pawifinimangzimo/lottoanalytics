@@ -231,29 +231,47 @@ class LotteryAnalyzer:
 #=======================
 
     def get_temperature_stats(self) -> Dict[str, List[int]]:
-        """Classify numbers as hot/cold using SQL"""
+        """Classify numbers by recency in draw counts only."""
+        hot_limit = self.config['analysis']['recency_bins']['hot']
+        cold_limit = self.config['analysis']['recency_bins']['cold']
+
         hot_query = f"""
-            SELECT n1 as num FROM draws 
-            WHERE date >= date('now', '-{self.config['analysis']['hot_days']} days')
-            GROUP BY n1 ORDER BY COUNT(*) DESC LIMIT ?
-        """
-        cold_query = f"""
+            WITH recent_draws AS (
+                SELECT ROWID FROM draws 
+                ORDER BY date DESC 
+                LIMIT {hot_limit}
+            )
             SELECT DISTINCT n1 as num FROM draws
-            WHERE n1 NOT IN (
-                SELECT DISTINCT n1 FROM draws
-                WHERE date >= date('now', '-{self.config['analysis']['cold_threshold']} days')
-            ) LIMIT ?
+            WHERE ROWID IN (SELECT ROWID FROM recent_draws)
+            UNION SELECT n2 FROM draws WHERE ROWID IN (SELECT ROWID FROM recent_draws)
+            UNION SELECT n3 FROM draws WHERE ROWID IN (SELECT ROWID FROM recent_draws)
+            UNION SELECT n4 FROM draws WHERE ROWID IN (SELECT ROWID FROM recent_draws)
+            UNION SELECT n5 FROM draws WHERE ROWID IN (SELECT ROWID FROM recent_draws)
+            UNION SELECT n6 FROM draws WHERE ROWID IN (SELECT ROWID FROM recent_draws)
         """
         
-        hot = pd.read_sql(hot_query, self.conn, 
-                         params=(self.config['analysis']['top_range'],))
-        cold = pd.read_sql(cold_query, self.conn,
-                          params=(self.config['analysis']['top_range'],))
+        cold_query = f"""
+            WITH active_draws AS (
+                SELECT ROWID FROM draws
+                ORDER BY date DESC
+                LIMIT {cold_limit}
+            )
+            SELECT DISTINCT n1 as num FROM draws
+            WHERE ROWID NOT IN (SELECT ROWID FROM active_draws)
+            EXCEPT SELECT n1 FROM draws WHERE ROWID IN (SELECT ROWID FROM active_draws)
+            -- Repeat for n2-n6...
+        """
+
+        hot = pd.read_sql(hot_query, self.conn)['num'].unique().tolist()
+        cold = pd.read_sql(cold_query, self.conn)['num'].unique().tolist()
         
-        return {
-            'hot': hot['num'].tolist(),
-            'cold': cold['num'].tolist()
-        }
+        return {'hot': hot[:self.config['analysis']['top_range']], 
+                'cold': cold[:self.config['analysis']['top_range']]}
+
+    def _get_draw_count(self) -> int:
+        """Get total number of draws in database."""
+        return self.conn.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
+
 #======================
 # Start Set generator
 #======================
@@ -361,6 +379,15 @@ class LotteryAnalyzer:
     def _get_prime_numbers(self) -> List[int]:
         """NEW: Get all primes in number pool"""
         return [n for n in self.number_pool if self._is_prime(n)]
+
+    def get_prime_temperature_stats(self) -> Dict[str, List[int]]:
+        """Classify primes as hot/cold based on draw counts."""
+        temp_stats = self.get_temperature_stats()
+        primes = set(self._get_prime_numbers())
+        return {
+            'hot_primes': sorted(n for n in temp_stats['hot'] if n in primes),
+            'cold_primes': sorted(n for n in temp_stats['cold'] if n in primes)
+        }
 
     def detect_patterns(self) -> Dict:
         """Analyze historical draws for common number patterns.
@@ -868,11 +895,8 @@ def main():
             }
         }
         # ============ END FEATURE RESULTS INIT ============
-        temp_stats = analyzer.get_temperature_stats() 
-        
-        all_primes = set(analyzer._get_prime_numbers())
-        hot_primes = analyzer._get_prime_subsets(temp_stats['hot'])
-        cold_primes = analyzer._get_prime_subsets(temp_stats['cold'])
+        temp_stats = analyzer.get_temperature_stats()
+        prime_temp_stats = analyzer.get_prime_temperature_stats()
             
         if not args.quiet:
             print("\n" + "="*50)
@@ -880,15 +904,13 @@ def main():
             print(f"\n🔢 Top {top_range} Frequent Numbers:")
             print(freqs.to_string())
             
-            print("\n🔥 Hot Numbers (last {} days):".format(
-                config['analysis']['hot_days']))
-            print(", ".join(map(str, temps['hot'])))
-            print(f"   • Primes: {', '.join(map(str, hot_primes)) or 'None'}")
-            
-            print("\n❄️ Cold Numbers (not seen in {} days):".format(
-                config['analysis']['cold_threshold']))
-            print(", ".join(map(str, temps['cold'])))
-            print(f"   • Primes: {', '.join(map(str, cold_primes)) or 'None'}")
+            print(f"\n🔥 Hot Numbers (last {config['analysis']['recency_bins']['hot']} draws):")
+            print(f"   Numbers: {', '.join(map(str, temp_stats['hot']))}")
+            print(f"   Primes: {', '.join(map(str, prime_temp_stats['hot_primes'])) or 'None'}")
+
+            print(f"\n❄️ Cold Numbers ({config['analysis']['recency_bins']['cold']}+ draws unseen):")
+            print(f"   Numbers: {', '.join(map(str, temp_stats['cold']))}")
+            print(f"   Primes: {', '.join(map(str, prime_temp_stats['cold_primes'])) or 'None'}")
 
 #==================
 # New Section
