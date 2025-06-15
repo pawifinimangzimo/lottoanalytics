@@ -311,32 +311,57 @@ class LotteryAnalyzer:
 #======================
 
     def generate_sets(self, strategy: str = None) -> List[List[int]]:
-        """Generate sets using current mode"""
+        """Generate sets with sum range validation."""
         strategy = strategy or self.config.get('strategy', {}).get('default_strategy', 'balanced')
         num_sets = self.config['output'].get('sets_to_generate', 4)
         
-        sets = []
-        for _ in range(num_sets):
-            if self.mode == 'auto':
-                # Auto-mode generates fresh weights each time
-                self._init_weights()
-            if strategy == 'balanced':
-                hot = self.get_temperature_stats()['hot'][:3]
-                cold = self.get_temperature_stats()['cold'][:2]
-                remaining = self.config['strategy']['numbers_to_select'] - len(hot) - len(cold)
-                random_nums = np.random.choice(
-                    [n for n in self.number_pool if n not in hot + cold],
-                    size=remaining,
-                    replace=False
-                )
-                sets.append(sorted(hot + cold + random_nums.tolist()))
-            
-            elif strategy == 'frequent':
-                top_n = self.config['strategy']['numbers_to_select']
-                freqs = self.get_frequencies()
-                sets.append(freqs.head(top_n).index.tolist())
+        # Get historical sum stats
+        sum_stats = self.get_sum_stats()
+        if sum_stats.get('error'):
+            q1, q3 = 0, 200  # Fallback ranges
+        else:
+            q1, q3 = sum_stats['q1'], sum_stats['q3']
         
-        return sets
+        sets = []
+        attempts = 0
+        max_attempts = num_sets * 3  # Prevent infinite loops
+        
+        while len(sets) < num_sets and attempts < max_attempts:
+            attempts += 1
+            if self.mode == 'auto':
+                self._init_weights()
+            
+            # Generate candidate set
+            candidate = self._generate_candidate_set(strategy)
+            total = sum(candidate)
+            
+            # Validate sum is within interquartile range (Q1-Q3)
+            if q1 <= total <= q3:
+                sets.append(sorted(candidate))
+        
+        return sets if sets else [self._generate_fallback_set()]
+
+    def _generate_candidate_set(self, strategy: str) -> List[int]:
+        """Generate one candidate set based on strategy."""
+        if strategy == 'balanced':
+            hot = self.get_temperature_stats()['hot'][:3]
+            cold = self.get_temperature_stats()['cold'][:2]
+            remaining = self.config['strategy']['numbers_to_select'] - len(hot) - len(cold)
+            random_nums = np.random.choice(
+                [n for n in self.number_pool if n not in hot + cold],
+                size=remaining,
+                replace=False
+            )
+            return hot + cold + random_nums.tolist()
+        # ... other strategies ...
+
+    def _generate_fallback_set(self) -> List[int]:
+        """Fallback if sum validation fails too often."""
+        return sorted(np.random.choice(
+            self.number_pool,
+            size=self.config['strategy']['numbers_to_select'],
+            replace=False
+        ))
 
 #===================
 # end set generator
@@ -761,6 +786,69 @@ class LotteryAnalyzer:
             }
         }
 
+############ SUMMARY ANALYSIS ######################
+
+    def get_sum_stats(self) -> dict:
+        """Calculate historical sum statistics (mean, min, max, quartiles)."""
+        query = """
+        WITH sums AS (
+            SELECT (n1+n2+n3+n4+n5+n6) as total 
+            FROM draws
+        )
+        SELECT
+            AVG(total) as avg_sum,
+            MIN(total) as min_sum,
+            MAX(total) as max_sum,
+            percentile_cont(0.25) WITHIN GROUP (ORDER BY total) as q1_sum,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY total) as median_sum,
+            percentile_cont(0.75) WITHIN GROUP (ORDER BY total) as q3_sum
+        FROM sums
+        """
+        try:
+            result = self.conn.execute(query).fetchone()
+            return {
+                'average': round(result[0], 1),
+                'min': result[1],
+                'max': result[2],
+                'q1': round(result[3], 1),
+                'median': round(result[4], 1),
+                'q3': round(result[5], 1)
+            }
+        except sqlite3.Error as e:
+            logging.error(f"Sum stats failed: {str(e)}")
+            return {'error': 'Sum analysis failed'}
+
+    def get_sum_frequencies(self, bin_size: int = 10) -> dict:
+        """Generate a histogram of sum frequencies (binned ranges)."""
+        query = f"""
+        WITH sums AS (
+            SELECT (n1+n2+n3+n4+n5+n6) as total 
+            FROM draws
+        ),
+        bins AS (
+            SELECT 
+                FLOOR(total/{bin_size})*{bin_size} as lower_bound,
+                COUNT(*) as frequency
+            FROM sums
+            GROUP BY FLOOR(total/{bin_size})
+        )
+        SELECT 
+            lower_bound,
+            lower_bound+{bin_size}-1 as upper_bound,
+            frequency
+        FROM bins
+        ORDER BY lower_bound
+        """
+        try:
+            rows = self.conn.execute(query).fetchall()
+            return {
+                f"{lb}-{ub}": freq for lb, ub, freq in rows
+            }
+        except sqlite3.Error as e:
+            logging.error(f"Sum frequency failed: {str(e)}")
+            return {'error': 'Sum frequency analysis failed'}
+
+####################################################
 ###########################################################################
 ########################
 
@@ -1155,6 +1243,21 @@ def main():
                     print(f"\n● Hot & Frequent Numbers:")
                     print(f"   - {hf['overlap_pct']}% of hot numbers are also top frequent")
                     print(f"   - Appear {hf['freq_multiplier']}x more often than average")
+                    
+            # In main(), after other analyses:
+            sum_stats = analyzer.get_sum_stats()
+            sum_freq = analyzer.get_sum_frequencies()
+
+            if not args.quiet and not sum_stats.get('error'):
+                print("\n🧮 Sum Range Analysis:")
+                print(f"   Historical average: {sum_stats['average']}")
+                print(f"   Q1-Q3 range: {sum_stats['q1']}-{sum_stats['q3']}")
+                print(f"   Min-Max: {sum_stats['min']}-{sum_stats['max']}")
+                
+                print("\n📊 Common Sum Ranges:")
+                for rng, freq in sorted(sum_freq.items(), key=lambda x: x[1], reverse=True)[:5]:
+                    print(f"   {rng}: {freq} draws")
+                    
 #==================
             print("\n🎰 Recommended Number Sets:")
             for i, nums in enumerate(sets, 1):
