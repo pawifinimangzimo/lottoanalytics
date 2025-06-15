@@ -63,8 +63,9 @@ class LotteryAnalyzer:
         self.weights = pd.Series(1.0, index=self.number_pool) 
         #number pool initialization end 
         #mode handler 
-        self._init_mode_handler()  # Add this line
         self.conn = self._init_db()
+        self._init_mode_handler()  # Add this line
+
         self._prepare_filesystem()
 
     # ======================
