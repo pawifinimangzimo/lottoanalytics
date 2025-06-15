@@ -1719,7 +1719,7 @@ def main():
         temps = analyzer.get_temperature_stats()
         sets = analyzer.generate_sets(args.strategy)
         top_range = analyzer.config['analysis']['top_range']
-        
+        gap_data = analyzer.get_formatted_gap_analysis()        
         # Console output (unless --quiet)
         
         # ============ INSERT FEATURE RESULTS INIT HERE ============
@@ -1762,7 +1762,7 @@ def main():
                     print(f"   Primes: {', '.join(map(str, overdue_primes))}")
 ####################### New Overd print ##############
             if not args.quiet and analyzer.config['analysis']['gap_analysis']['enabled']:
-                gap_data = analyzer.get_formatted_gap_analysis()
+
                 if gap_data:
                     print("\n⏰ Overdue Numbers Analysis:")
                     if gap_data['most_overdue']:
