@@ -1084,80 +1084,80 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
-    def _initialize_gap_analysis(self):
-        """Initialize the gap analysis table with historical data"""
-
-        if not self.config['analysis']['gap_analysis']['enabled']:
-            return
-
-        # Clear and recreate table to ensure clean state
-        self.conn.executescript("""
-            DROP TABLE IF EXISTS number_gaps;
-            CREATE TABLE number_gaps (
-                number INTEGER PRIMARY KEY,
-                last_seen_date TEXT,
-                current_gap INTEGER DEFAULT 0,
-                avg_gap REAL,
-                max_gap INTEGER,
-                is_overdue BOOLEAN DEFAULT FALSE
-            );
-        """)
-
-        # 2. Get settings (now safe because we checked enabled)
-        mode = self.config['analysis']['gap_analysis']['mode']
-        auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
-        manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
-
-        # Clear existing data
-        self.conn.execute("DELETE FROM number_gaps")
+def _initialize_gap_analysis(self):
+    if not self.config['analysis']['gap_analysis']['enabled']:
+        return
         
-        # Insert all numbers from pool
-        self.conn.executemany(
-            "INSERT INTO number_gaps (number) VALUES (?)",
-            [(n,) for n in self.number_pool]
-        )
+    print("\nINITIALIZING GAP ANALYSIS...")  # Debug line
+    
+    # 1. Get all numbers that have ever appeared
+    existing_nums = set()
+    for i in range(1,7):
+        nums = self.conn.execute(f"SELECT DISTINCT n{i} FROM draws").fetchall()
+        existing_nums.update(n[0] for n in nums)
+    
+    # 2. Initialize table with ALL pool numbers
+    self.conn.executemany(
+        "INSERT OR IGNORE INTO number_gaps (number) VALUES (?)",
+        [(n,) for n in self.number_pool]
+    )
+    
+    # 3. Calculate initial gaps for existing numbers
+    for num in existing_nums:
+        # Get last seen date
+        last_seen = self.conn.execute("""
+            SELECT MAX(date) FROM draws
+            WHERE ? IN (n1,n2,n3,n4,n5,n6)
+        """, (num,)).fetchone()[0]
         
-        # Calculate initial gaps from historical data
-        for num in self.number_pool:
-            # Get last seen date
-            last_seen = self.conn.execute("""
-                SELECT MAX(date) FROM draws
-                WHERE ? IN (n1, n2, n3, n4, n5, n6)
-            """, (num,)).fetchone()[0]
+        if last_seen:
+            # Calculate current gap (draws since last seen)
+            gap = self.conn.execute("""
+                SELECT COUNT(*) FROM draws
+                WHERE date > ?
+            """, (last_seen,)).fetchone()[0]
             
-            if last_seen:
-                # Calculate current gap (draws since last seen)
-                gap = self.conn.execute("""
-                    SELECT COUNT(*) FROM draws
-                    WHERE date > ?
-                """, (last_seen,)).fetchone()[0]
+            # Calculate historical average gap
+            dates = self.conn.execute("""
+                SELECT date FROM draws
+                WHERE ? IN (n1,n2,n3,n4,n5,n6)
+                ORDER BY date
+            """, (num,)).fetchall()
+            
+            if len(dates) > 1:
+                avg_gap = sum(
+                    (dates[i+1][0] - dates[i][0]).days 
+                    for i in range(len(dates)-1)
+                ) / (len(dates)-1)
+            else:
+                avg_gap = gap
                 
-                # Calculate average gap
-                avg_gap = self._calculate_avg_gap(num)
-                
-                # Update record
-                self.conn.execute("""
-                    UPDATE number_gaps
-                    SET last_seen_date = ?,
-                        current_gap = ?,
-                        avg_gap = ?,
-                        is_overdue = CASE
-                            WHEN ? = 'manual' THEN ? >= ?
-                            ELSE ? >= ? * ?
-                        END
-                    WHERE number = ?
-                """, (
-                    last_seen,
-                    gap,
-                    avg_gap,
-                    self.config['analysis']['gap_analysis']['mode'],
-                    gap,
-                    self.config['analysis']['gap_analysis']['manual_threshold'],
-                    gap,
-                    avg_gap,
-                    self.config['analysis']['gap_analysis']['auto_threshold'],
-                    num
-                ))
+            # Update record
+            mode = self.config['analysis']['gap_analysis']['mode']
+            auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
+            manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
+            
+            self.conn.execute("""
+                UPDATE number_gaps
+                SET last_seen_date = ?,
+                    current_gap = ?,
+                    avg_gap = ?,
+                    is_overdue = CASE
+                        WHEN ? = 'manual' THEN ? >= ?
+                        ELSE ? >= ? * ?
+                    END
+                WHERE number = ?
+            """, (
+                last_seen,
+                gap,
+                avg_gap,
+                mode,
+                gap, manual_thresh,
+                gap, avg_gap, auto_thresh,
+                num
+            ))
+    
+    self._verify_gap_analysis()  # Show diagnostic data
 
 ###############
     def update_gap_stats(self):
