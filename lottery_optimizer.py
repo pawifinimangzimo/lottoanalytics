@@ -310,6 +310,67 @@ class LotteryAnalyzer:
 # Start Set generator
 #======================
 
+    def _is_valid(self, numbers: List[int]) -> Tuple[bool, List[str]]:
+        """
+        Returns: 
+            (is_valid, notes)
+        Notes format:
+            ["Sum: 180 (Optimal range: 128-195)", "2 hot numbers", ...]
+        """
+        notes = []
+        total = sum(numbers)
+        
+        # 1. Sum validation
+        sum_stats = self.get_sum_stats()
+        if not sum_stats.get('error'):
+            q1, q3 = sum_stats['q1'], sum_stats['q3']
+            margin = (q3 - q1) * self.config['validation'].get('sum_margin', 0.15)
+            
+            if total < (q1 - margin):
+                return False, [f"Sum: {total} (Below minimum {int(q1 - margin)})"]
+            if total > (q3 + margin):
+                return False, [f"Sum: {total} (Above maximum {int(q3 + margin)})"]
+            notes.append(f"Sum: {total} (Optimal range: {int(q1)}-{int(q3)})")
+        
+        # 2. Hot numbers (optional)
+        if self.config['validation'].get('check_hot_numbers', True):
+            hot_nums = [n for n in numbers if n in self.get_temperature_stats()['hot']]
+            if hot_nums:
+                notes.append(f"{len(hot_nums)} hot numbers ({', '.join(map(str, hot_nums))})")
+        
+        return True, notes
+
+    def generate_valid_sets(self) -> List[Dict]:
+        """
+        Returns: 
+            [{
+                'numbers': [7,9,...],
+                'sum': 180,
+                'notes': ["Sum: 180...", ...]
+            }, ...]
+        """
+        results = []
+        attempts = 0
+        max_attempts = self.config['output'].get('max_attempts', 100)
+        
+        while len(results) < self.config['output']['sets_to_generate']:
+            candidate = self._generate_candidate()
+            is_valid, notes = self._is_valid(candidate)
+            
+            if is_valid:
+                results.append({
+                    'numbers': candidate,
+                    'sum': sum(candidate),
+                    'notes': notes
+                })
+            attempts += 1
+            
+            if attempts >= max_attempts:
+                logging.warning(f"Max attempts reached ({max_attempts})")
+                break
+        
+        return results
+
     def generate_sets(self, strategy: str = None) -> List[List[int]]:
         """Generate sets with sum range validation."""
         strategy = strategy or self.config.get('strategy', {}).get('default_strategy', 'balanced')
@@ -1269,6 +1330,14 @@ def main():
             for i, nums in enumerate(sets, 1):
                 print(f"Set {i}: {'-'.join(map(str, nums))}")
             print("\n" + "="*50)
+            #################################
+            valid_sets = analyzer.generate_valid_sets()
+
+            print("\n=== OPTIMIZED SETS ===")
+            for i, s in enumerate(valid_sets, 1):
+                print(f"{i}. {'-'.join(map(str, s['numbers']))} ✅")
+                for note in s['notes']:
+                    print(f"   • {note}")
         # Save files
         results_path = analyzer.save_results(sets)
         if not args.quiet:
