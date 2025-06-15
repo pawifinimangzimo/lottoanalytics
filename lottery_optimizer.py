@@ -986,7 +986,8 @@ class LotteryAnalyzer:
 # ======================
     # COMBINED ANALYSIS
     # ======================
-    def run_analyses(self) -> dict:
+ 
+     def run_analyses(self) -> dict:
         """
         Run all configured analyses and return consolidated results.
         
@@ -995,16 +996,25 @@ class LotteryAnalyzer:
                 'frequency': pd.Series,
                 'primes': {'avg_primes': float, ...},
                 'high_low': {'pct_with_low': float, ...},
+                'gap_analysis': {  # New section
+                    'overdue': List[int], 
+                    'stats': {
+                        'avg_gap': float,
+                        'max_gap': int,
+                        ...
+                    },
+                    'distribution': dict
+                },
                 'metadata': {
                     'effective_draws': {
                         'primes': int,
-                        'high_low': int
+                        'high_low': int,
+                        'gap_analysis': int  # New
                     }
                 }
             }
         """
-        return {
-        
+        results = {
             'frequency': self.get_frequencies(),
             'primes': self.get_prime_stats(),
             'high_low': self.get_highlow_stats(),
@@ -1014,11 +1024,20 @@ class LotteryAnalyzer:
                     'high_low': self._get_analysis_draw_limit('high_low', 400)
                 }
             }
-            'gap_analysis': {
+        }
+        
+        # Conditionally add gap analysis if enabled
+        if self.config['analysis']['gap_analysis']['enabled']:
+            results['gap_analysis'] = {
+                'overdue': self.get_overdue_numbers(),
                 'stats': self.get_gap_stats(),
                 'distribution': self.get_gap_distribution()
             }
-        }
+            results['metadata']['effective_draws']['gap_analysis'] = \
+                self._get_draw_count()  # Or specific limit if needed
+        
+        return results
+ 
 
 ############ SUMMARY ANALYSIS ######################
 
