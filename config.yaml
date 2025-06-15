@@ -77,6 +77,12 @@ analysis:
     low_number_max: 10 
     enable_ratio_analysis: true
     alert_threshold: 0.15
+  number_ranges:
+    low_max: 15      # 1-15 = Low
+    mid_max: 30      # 16-30 = Mid 
+    high_max: 45     # 31-45 = High (or 58 for bigger pools)
+    # Optional:
+    dynamic_ranges: true  # Auto-adjust based on number_pool
  # Add these new sections (keep existing ones)
 mode: auto  # New root-level option
 
