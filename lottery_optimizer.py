@@ -310,6 +310,20 @@ class LotteryAnalyzer:
 # Start Set generator
 #======================
 
+    def _get_sum_percentile(self, sum_value: int) -> float:
+        """Calculate what percentile a sum falls into historically"""
+        query = """
+        WITH sums AS (
+            SELECT (n1+n2+n3+n4+n5+n6) as total 
+            FROM draws
+        )
+        SELECT 
+            CAST(SUM(CASE WHEN total <= ? THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*)
+        FROM sums
+        """
+        percentile = self.conn.execute(query, (sum_value,)).fetchone()[0]
+        return round(percentile * 100, 1)
+
     def _is_valid(self, numbers: List[int]) -> Tuple[bool, List[str]]:
         """
         Returns: 
@@ -331,7 +345,16 @@ class LotteryAnalyzer:
             if total > (q3 + margin):
                 return False, [f"Sum: {total} (Above maximum {int(q3 + margin)})"]
             notes.append(f"Sum: {total} (Optimal range: {int(q1)}-{int(q3)})")
-        
+
+            # Insert percentile calculation here (new code)
+            if self.config['output'].get('show_percentiles', True):
+                percentile = self._get_sum_percentile(total)
+                notes.append(
+                    f"Sum: {total} (Top {percentile}% | Range: {int(q1)}-{int(q3)})"
+                )
+            else:
+                notes.append(f"Sum: {total} (Optimal range: {int(q1)}-{int(q3)})")
+
         # 2. Hot numbers (optional)
         if self.config['validation'].get('check_hot_numbers', True):
             hot_nums = [n for n in numbers if n in self.get_temperature_stats()['hot']]

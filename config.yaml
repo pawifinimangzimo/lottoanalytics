@@ -47,7 +47,8 @@ output:
     show_combo_stats: true
   max_attempts: 100         # Safety limit
   debug: false  
-    
+  sum_percentiles: true
+
 analysis:
   default_match_threshold: 4    # Fallback when CLI not provided
   default_show_top: 5           # Fallback when CLI not provided
