@@ -16,7 +16,7 @@ from collections import defaultdict
 from itertools import combinations
 from datetime import datetime
 import argparse
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 import logging
 
 # ======================
