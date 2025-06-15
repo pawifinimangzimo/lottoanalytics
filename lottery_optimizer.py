@@ -334,23 +334,22 @@ class LotteryAnalyzer:
         query = "SELECT number FROM number_gaps WHERE is_overdue = TRUE"
         return [row[0] for row in self.conn.execute(query)]
         
-    def _recalculate_avg_gaps(self):
-        """Recalculate average gaps for all numbers"""
-        self.conn.execute("""
-            UPDATE number_gaps
-            SET avg_gap = (
-                SELECT AVG(gap) FROM (
-                    SELECT julianday(d1.date) - julianday(d2.date) as gap
-                    FROM draws d1
-                    JOIN draws d2 ON d1.date > d2.date
-                    WHERE ? IN (d1.n1,d1.n2,d1.n3,d1.n4,d1.n5,d1.n6)
-                      AND ? IN (d2.n1,d2.n2,d2.n3,d2.n4,d2.n5,d2.n6)
-                    ORDER BY d1.date DESC
-                    LIMIT 10
-                )
-            )
-            WHERE number = ?
-        """, [(n,n,n) for n in self.number_pool])
+    def _calculate_avg_gap(self, num):
+        """Calculate average gap for a specific number"""
+        gaps = self.conn.execute("""
+            SELECT julianday(d1.date) - julianday(d2.date) as gap
+            FROM draws d1
+            JOIN draws d2 ON d1.date > d2.date
+            WHERE ? IN (d1.n1, d1.n2, d1.n3, d1.n4, d1.n5, d1.n6)
+              AND ? IN (d2.n1, d2.n2, d2.n3, d2.n4, d2.n5, d2.n6)
+            ORDER BY d1.date DESC
+            LIMIT 10
+        """, (num, num)).fetchall()
+        
+        if not gaps:
+            return 0
+        return sum(gap[0] for gap in gaps) / len(gaps)
+        
 #======================
 # Start Set generator
 #======================
@@ -1045,7 +1044,7 @@ class LotteryAnalyzer:
 ############### GAP ANALYSIS #####################################
 
     def _initialize_gap_analysis(self):
-        """Populate number_gaps table with initial data"""
+        """Initialize the gap analysis table with historical data"""
         # Clear existing data
         self.conn.execute("DELETE FROM number_gaps")
         
@@ -1055,8 +1054,47 @@ class LotteryAnalyzer:
             [(n,) for n in self.number_pool]
         )
         
-        # Calculate initial gaps
-        self._update_all_gaps()
+        # Calculate initial gaps from historical data
+        for num in self.number_pool:
+            # Get last seen date
+            last_seen = self.conn.execute("""
+                SELECT MAX(date) FROM draws
+                WHERE ? IN (n1, n2, n3, n4, n5, n6)
+            """, (num,)).fetchone()[0]
+            
+            if last_seen:
+                # Calculate current gap (draws since last seen)
+                gap = self.conn.execute("""
+                    SELECT COUNT(*) FROM draws
+                    WHERE date > ?
+                """, (last_seen,)).fetchone()[0]
+                
+                # Calculate average gap
+                avg_gap = self._calculate_avg_gap(num)
+                
+                # Update record
+                self.conn.execute("""
+                    UPDATE number_gaps
+                    SET last_seen_date = ?,
+                        current_gap = ?,
+                        avg_gap = ?,
+                        is_overdue = CASE
+                            WHEN ? = 'manual' THEN ? >= ?
+                            ELSE ? >= ? * ?
+                        END
+                    WHERE number = ?
+                """, (
+                    last_seen,
+                    gap,
+                    avg_gap,
+                    self.config['gap_analysis']['mode'],
+                    gap,
+                    self.config['gap_analysis']['manual_threshold'],
+                    gap,
+                    avg_gap,
+                    self.config['gap_analysis']['auto_threshold'],
+                    num
+                ))
 
 ###############
     def update_gap_stats(self):
