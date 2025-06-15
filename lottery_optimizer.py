@@ -105,6 +105,14 @@ class LotteryAnalyzer:
             CREATE INDEX IF NOT EXISTS idx_numbers 
             ON draws(n1,n2,n3,n4,n5,n6)
         """)
+        
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_primes ON draws(n1,n2,n3,n4,n5,n6)
+            WHERE n1 IN (2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53);
+            
+            CREATE INDEX IF NOT EXISTS idx_low_numbers ON draws(n1,n2,n3,n4,n5,n6)
+            WHERE n1 <= 10 OR n2 <= 10 OR n3 <= 10 OR n4 <= 10 OR n5 <= 10 OR n6 <= 10;
+        """)
         return conn
 
     def _prepare_filesystem(self) -> None:
@@ -272,6 +280,32 @@ class LotteryAnalyzer:
         """Get total number of draws in database."""
         return self.conn.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
 
+    def _get_analysis_draw_limit(self, feature: str, default: int) -> int:
+        """NEW: Safe config reader for analysis draw counts"""
+        try:
+            limit = self.config['analysis'][feature].get('draws', default)
+            return max(1, min(limit, self._get_draw_count()))  # Clamp to valid range
+        except (KeyError, TypeError):
+            return default
+
+    def _get_historical_ratio(self) -> float:
+        """Get long-term high/low ratio average"""
+        query = """
+        WITH all_numbers AS (
+            SELECT n1 as num FROM draws UNION ALL
+            SELECT n2 FROM draws UNION ALL
+            SELECT n3 FROM draws UNION ALL
+            SELECT n4 FROM draws UNION ALL
+            SELECT n5 FROM draws UNION ALL
+            SELECT n6 FROM draws
+        )
+        SELECT 
+            SUM(CASE WHEN num > ? THEN 1 ELSE 0 END) * 1.0 /
+            NULLIF(SUM(CASE WHEN num <= ? THEN 1 ELSE 0 END), 0)
+        FROM all_numbers
+        """
+        low_max = self.config['analysis']['high_low']['low_number_max']
+        return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 #======================
 # Start Set generator
 #======================
@@ -362,6 +396,38 @@ class LotteryAnalyzer:
 #==============================
 #End mode handler
 #=============================
+
+    def get_prime_stats(self) -> dict:
+        """Enhanced prime analysis with safeguards"""
+        try:
+            draw_limit = max(1, self._get_analysis_draw_limit('primes', 500))
+            hot_threshold = self.config['analysis']['primes'].get('hot_threshold', 5)
+            
+            query = f"""
+                WITH recent_draws AS (
+                    SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
+                ),
+                prime_counts AS (
+                    SELECT date, 
+                           SUM(CASE WHEN n1 IN ({','.join(map(str, self.prime_numbers))}) THEN 1 ELSE 0 END) +
+                           SUM(CASE WHEN n2 IN ({','.join(map(str, self.prime_numbers))}) THEN 1 ELSE 0 END) +
+                           ... AS prime_count
+                    FROM recent_draws
+                    GROUP BY date
+                )
+                SELECT 
+                    AVG(prime_count) as avg_primes_per_draw,
+                    SUM(CASE WHEN prime_count >= 2 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as pct_two_plus_primes
+                FROM prime_counts
+            """
+            result = self.conn.execute(query).fetchone()
+            return {
+                'avg_primes': round(result[0], 2),
+                'pct_two_plus': round(result[1], 1)
+            }
+        except sqlite3.Error as e:
+            logging.error(f"Prime stats failed: {str(e)}")
+            return {'error': 'Prime analysis unavailable'}
 
     def _is_prime(self, n: int) -> bool:
         """Helper method to check if a number is prime"""
@@ -471,6 +537,73 @@ class LotteryAnalyzer:
 
 ########################
 
+     def get_highlow_stats(self) -> dict:
+        try:
+            cfg = self.config['analysis']['high_low']
+            draw_limit = max(1, self._get_analysis_draw_limit('high_low', cfg.get('draws', 400)))
+            low_max = cfg['low_number_max']
+            
+            query = f"""
+            WITH recent_draws AS (
+                SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
+            ),
+            number_flags AS (
+                SELECT date,
+                    CASE WHEN n1 <= {low_max} OR n2 <= {low_max} OR 
+                              n3 <= {low_max} OR n4 <= {low_max} OR
+                              n5 <= {low_max} OR n6 <= {low_max} 
+                         THEN 1 ELSE 0 END as has_low,
+                    CASE WHEN n1 > {low_max} OR n2 > {low_max} OR 
+                              n3 > {low_max} OR n4 > {low_max} OR
+                              n5 > {low_max} OR n6 > {low_max} 
+                         THEN 1 ELSE 0 END as has_high
+                FROM recent_draws
+            )
+            SELECT 
+                AVG(has_low) * 100 as pct_with_low,
+                AVG(has_high) * 100 as pct_with_high,
+                SUM(has_low) as low_draws,
+                SUM(has_high) as high_draws,
+                COUNT(*) as total_draws,
+                {low_max} as low_threshold
+            FROM number_flags
+            """
+            result = self.conn.execute(query).fetchone()
+            
+            stats = {
+                'pct_with_low': round(result[0], self.config['output']['high_low'].get('decimal_places', 1)),
+                'pct_with_high': round(result[1], self.config['output']['high_low'].get('decimal_places', 1)),
+                'low_draws': result[2],
+                'high_draws': result[3],
+                'total_draws': result[4],
+                'low_threshold': result[5],
+                'ratio': round(result[1]/result[0], 2) if result[0] > 0 else 0
+            }
+            
+            if cfg.get('enable_ratio_analysis', False):
+                stats['ratio_alert'] = self._check_ratio_deviation(stats['ratio'])
+                
+            return stats
+            
+        except Exception as e:
+            logging.error(f"High-low stats failed: {str(e)}")
+            return {'error': 'High-low analysis failed'}
+
+    def _check_ratio_deviation(self, current_ratio: float) -> str:
+        """Check if ratio deviates significantly from historical average"""
+        historical = self._get_historical_ratio()
+        threshold = self.config['analysis']['high_low'].get('alert_threshold', 0.15)
+        
+        if not historical:
+            return "No historical data for comparison"
+            
+        deviation = abs(current_ratio - historical) / historical
+        if deviation > threshold:
+            direction = "higher" if current_ratio > historical else "lower"
+            return f"Warning: Current ratio is {deviation*100:.1f}% {direction} than historical average"
+        return None
+
+########################
     def get_combination_stats(self, size: int) -> Dict:
         """Get statistics for number combinations of given size.
         Returns: {
@@ -582,6 +715,39 @@ class LotteryAnalyzer:
 
 ###########################################################################
 
+# ======================
+    # COMBINED ANALYSIS
+    # ======================
+    def run_analyses(self) -> dict:
+        """
+        Run all configured analyses and return consolidated results.
+        
+        Returns:
+            {
+                'frequency': pd.Series,
+                'primes': {'avg_primes': float, ...},
+                'high_low': {'pct_with_low': float, ...},
+                'metadata': {
+                    'effective_draws': {
+                        'primes': int,
+                        'high_low': int
+                    }
+                }
+            }
+        """
+        return {
+            'frequency': self.get_frequencies(),
+            'primes': self.get_prime_stats(),
+            'high_low': self.get_highlow_stats(),
+            'metadata': {
+                'effective_draws': {
+                    'primes': self._get_analysis_draw_limit('primes', 500),
+                    'high_low': self._get_analysis_draw_limit('high_low', 400)
+                }
+            }
+        }
+
+###########################################################################
 ########################
 
 # ======================
@@ -912,6 +1078,15 @@ def main():
             print(f"   Numbers: {', '.join(map(str, temp_stats['cold']))}")
             print(f"   Primes: {', '.join(map(str, prime_temp_stats['cold_primes'])) or 'None'}")
 
+######## HIGH LOW ###############
+
+        high_low = analyzer.get_highlow_stats()
+        if high_low and not args.quiet:
+            print(f"\n⬆⬇ High-Low Analysis (Low ≤{high_low['low_threshold']}, High >{high_low['low_threshold']}):")
+            print(f"  - Low numbers in {high_low['pct_with_low']}% of draws")
+            print(f"  - High numbers in {high_low['pct_with_high']}% of draws")
+            print(f"  - {high_low['low_draws']} low and {high_low['high_draws']} high of last {high_low['total_draws']} draws")
+##############################################
 #==================
 # New Section
 #==================
