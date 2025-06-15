@@ -1775,7 +1775,7 @@ def main():
         temps = analyzer.get_temperature_stats()
         sets = analyzer.generate_sets(args.strategy)
         top_range = analyzer.config['analysis']['top_range']
-        gap_data = analyzer.get_formatted_gap_analysis()        
+        #gap_data = analyzer.get_formatted_gap_analysis()        
         # Console output (unless --quiet)
         
         # ============ INSERT FEATURE RESULTS INIT HERE ============
