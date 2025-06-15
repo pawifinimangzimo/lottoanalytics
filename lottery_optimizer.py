@@ -1085,6 +1085,21 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
+    def get_overdue_numbers(self) -> List[int]:
+        """Get numbers marked as overdue in gap analysis"""
+        if not self.config['analysis']['gap_analysis']['enabled']:
+            return []
+        
+        query = """
+        SELECT number FROM number_gaps 
+        WHERE is_overdue = TRUE
+        ORDER BY current_gap DESC
+        LIMIT ?
+        """
+        top_n = self.config['analysis']['top_range']
+        return [row[0] for row in self.conn.execute(query, (top_n,))]
+
+
     def _parse_date(self, date_str):
         """Flexible date parser handling multiple formats"""
         formats = [
@@ -1544,7 +1559,7 @@ def main():
         # ============ END FEATURE RESULTS INIT ============
         temp_stats = analyzer.get_temperature_stats()
         prime_temp_stats = analyzer.get_prime_temperature_stats()
-            
+        overdue = analyzer.get_overdue_numbers() 
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
@@ -1558,6 +1573,15 @@ def main():
             print(f"\n❄️ Cold Numbers ({config['analysis']['recency_bins']['cold']}+ draws unseen):")
             print(f"   Numbers: {', '.join(map(str, temp_stats['cold']))}")
             print(f"   Primes: {', '.join(map(str, prime_temp_stats['cold_primes'])) or 'None'}")
+
+        # New Overdue Numbers Section
+            if overdue:
+                print(f"\n⏰ Overdue Numbers ({config['analysis']['gap_analysis']['manual_threshold']}+ draws unseen):")
+                print(f"   Numbers: {', '.join(map(str, overdue))}")
+                # Get primes from overdue numbers
+                overdue_primes = [n for n in overdue if analyzer._is_prime(n)]
+                if overdue_primes:
+                    print(f"   Primes: {', '.join(map(str, overdue_primes))}")
 
 ######## HIGH LOW ###############
 
