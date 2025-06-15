@@ -162,7 +162,7 @@ class LotteryAnalyzer:
                 'draws', self.conn, if_exists='replace', index=False
             )
 
-            # Initialize gap analysis after loading data
+            # Move gap analysis initialization AFTER data is loaded
             if self.config['analysis']['gap_analysis']['enabled']:
                 self._initialize_gap_analysis()
    
@@ -1059,7 +1059,20 @@ class LotteryAnalyzer:
 
         if not self.config['analysis']['gap_analysis']['enabled']:
             return
-            
+
+        # Clear and recreate table to ensure clean state
+        self.conn.executescript("""
+            DROP TABLE IF EXISTS number_gaps;
+            CREATE TABLE number_gaps (
+                number INTEGER PRIMARY KEY,
+                last_seen_date TEXT,
+                current_gap INTEGER DEFAULT 0,
+                avg_gap REAL,
+                max_gap INTEGER,
+                is_overdue BOOLEAN DEFAULT FALSE
+            );
+        """)
+
         # 2. Get settings (now safe because we checked enabled)
         mode = self.config['analysis']['gap_analysis']['mode']
         auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
