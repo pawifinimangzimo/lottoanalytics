@@ -63,6 +63,8 @@ class LotteryAnalyzer:
         self.weights = pd.Series(1.0, index=self.number_pool) 
         #number pool initialization end 
         #mode handler 
+        
+        self._validate_gap_analysis_config()  # Add this line
         self.conn = self._init_db()
         self._init_mode_handler()  # Add this line
 
@@ -325,7 +327,16 @@ class LotteryAnalyzer:
         low_max = self.config['analysis']['high_low']['low_number_max']
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers         
-        
+
+    def _validate_gap_analysis_config(self):
+        """Ensure gap_analysis config has all required fields"""
+        gap_config = self.config.setdefault('analysis', {}).setdefault('gap_analysis', {})
+        gap_config.setdefault('enabled', True)  # Default to True since you're using it
+        gap_config.setdefault('mode', 'auto')
+        gap_config.setdefault('auto_threshold', 1.5)
+        gap_config.setdefault('manual_threshold', 10)
+        gap_config.setdefault('weight_influence', 0.3)
+
     def _get_overdue_numbers(self) -> List[int]:
         """Return list of numbers marked as overdue in number_gaps table"""
         if not self.config['analysis']['gap_analysis']['enabled']:
@@ -1045,6 +1056,15 @@ class LotteryAnalyzer:
 
     def _initialize_gap_analysis(self):
         """Initialize the gap analysis table with historical data"""
+
+        if not self.config['analysis']['gap_analysis']['enabled']:
+            return
+            
+        # 2. Get settings (now safe because we checked enabled)
+        mode = self.config['analysis']['gap_analysis']['mode']
+        auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
+        manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
+
         # Clear existing data
         self.conn.execute("DELETE FROM number_gaps")
         
