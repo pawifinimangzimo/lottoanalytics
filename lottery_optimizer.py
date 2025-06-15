@@ -987,7 +987,7 @@ class LotteryAnalyzer:
     # COMBINED ANALYSIS
     # ======================
  
-     def run_analyses(self) -> dict:
+    def run_analyses(self) -> dict:
         """
         Run all configured analyses and return consolidated results.
         
