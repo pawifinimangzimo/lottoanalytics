@@ -330,63 +330,108 @@ class LotteryAnalyzer:
 # Helpers
 
     def _atomic_gap_check(self):
-        """Thread-safe schema verification"""
-        with self.conn:
-            # Create table if not exists
-            self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS number_gaps (
-                number INTEGER PRIMARY KEY,
-                last_seen_date TEXT,
-                current_gap INTEGER DEFAULT 0,
-                avg_gap REAL,
-                max_gap INTEGER,
-                is_overdue BOOLEAN DEFAULT FALSE
-            )""")
-            
-            # SQLite doesn't support IF NOT EXISTS for columns, so try/except
-            try:
+        """Thread-safe schema verification with diagnostics"""
+        try:
+            with self.conn:
+                # Create table if not exists
+                self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS number_gaps (
+                    number INTEGER PRIMARY KEY,
+                    last_seen_date TEXT,
+                    current_gap INTEGER DEFAULT 0,
+                    avg_gap REAL,
+                    max_gap INTEGER,
+                    is_overdue BOOLEAN DEFAULT FALSE
+                )""")
+                
+                # Check column existence
+                cols = [col[1] for col in self.conn.execute("PRAGMA table_info(number_gaps)")]
+                if 'is_overdue' not in cols:
+                    print("⚠️ Adding missing is_overdue column")
+                    self.conn.execute("ALTER TABLE number_gaps ADD COLUMN is_overdue BOOLEAN DEFAULT FALSE")
+                
+                # Verify index
+                self.conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue)
+                """)
+                
+                # Immediate test query
                 self.conn.execute("SELECT is_overdue FROM number_gaps LIMIT 1")
-            except sqlite3.OperationalError:
-                self.conn.execute("ALTER TABLE number_gaps ADD COLUMN is_overdue BOOLEAN DEFAULT FALSE")
-            
-            # Ensure index exists
-            self.conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue)
-            """)
+            return True
+        except Exception as e:
+            print(f"🔴 Atomic check failed: {str(e)}")
+            raise
 
     def _nuclear_repair(self):
-        """Complete table reconstruction"""
-        with self.conn:
-            # Backup existing data
+        """Complete table reconstruction with detailed diagnostics"""
+        print("\n🚀 Starting nuclear repair with diagnostics...")
+        
+        # 1. Pre-repair diagnostics
+        try:
+            print("\n🔍 Pre-repair state:")
+            print(f"- Table exists: {bool(self.conn.execute('SELECT 1 FROM sqlite_master WHERE type=\"table\" AND name=\"number_gaps\"').fetchone())}")
+            print(f"- Columns: {[col[1] for col in self.conn.execute('PRAGMA table_info(number_gaps)')]}")
+        except Exception as e:
+            print(f"⚠️ Pre-repair diagnostics failed: {str(e)}")
+
+        # 2. Backup with schema awareness
+        backup = []
+        try:
+            backup = self.conn.execute("""
+                SELECT number, last_seen_date, current_gap, avg_gap, max_gap 
+                FROM number_gaps
+            """).fetchall()
+            print(f"ℹ️ Backed up {len(backup)} records")
+        except Exception as e:
+            print(f"⚠️ Backup failed: {str(e)}")
+            if "no such table" not in str(e):
+                raise
+
+        # 3. Rebuild schema
+        try:
+            with self.conn:
+                self.conn.executescript("""
+                DROP TABLE IF EXISTS number_gaps;
+                CREATE TABLE number_gaps (
+                    number INTEGER PRIMARY KEY,
+                    last_seen_date TEXT,
+                    current_gap INTEGER DEFAULT 0,
+                    avg_gap REAL,
+                    max_gap INTEGER,
+                    is_overdue BOOLEAN DEFAULT FALSE
+                );
+                CREATE INDEX idx_overdue ON number_gaps(is_overdue);
+                """)
+            print("🛠️ Schema rebuilt successfully")
+        except Exception as e:
+            print(f"❌ Critical repair failure: {str(e)}")
+            raise
+
+        # 4. Restore data with progress
+        if backup:
+            print("↩️ Restoring data...")
             try:
-                backup = self.conn.execute("""
-                    SELECT number, last_seen_date, current_gap, avg_gap 
-                    FROM number_gaps
-                """).fetchall()
-            except:
-                backup = []
-            
-            # Rebuild schema
-            self.conn.executescript("""
-            DROP TABLE IF EXISTS number_gaps;
-            CREATE TABLE number_gaps (
-                number INTEGER PRIMARY KEY,
-                last_seen_date TEXT,
-                current_gap INTEGER DEFAULT 0,
-                avg_gap REAL,
-                max_gap INTEGER,
-                is_overdue BOOLEAN DEFAULT FALSE
-            );
-            CREATE INDEX idx_overdue ON number_gaps(is_overdue);
-            """)
-            
-            # Restore data
-            if backup:
-                self.conn.executemany("""
-                INSERT INTO number_gaps 
-                (number, last_seen_date, current_gap, avg_gap)
-                VALUES (?, ?, ?, ?)
-                """, backup)
+                with self.conn:
+                    self.conn.executemany("""
+                    INSERT INTO number_gaps 
+                    (number, last_seen_date, current_gap, avg_gap, max_gap)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, backup)
+                print(f"✅ Restored {len(backup)} records")
+            except Exception as e:
+                print(f"⚠️ Partial restore: {str(e)}")
+
+        # 5. Post-repair verification
+        try:
+            print("\n🔍 Post-repair verification:")
+            cols = [col[1] for col in self.conn.execute('PRAGMA table_info(number_gaps)')]
+            print(f"- Columns: {cols}")
+            assert 'is_overdue' in cols
+            print("🟢 Repair successful")
+        except Exception as e:
+            print(f"🔴 Verification failed: {str(e)}")
+            raise
+
 
     def _repair_schema(self):
         """Completely rebuild the table if corrupted"""
