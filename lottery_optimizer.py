@@ -159,7 +159,11 @@ class LotteryAnalyzer:
             df[['date'] + [f'n{i}' for i in range(1, 7)]].to_sql(
                 'draws', self.conn, if_exists='replace', index=False
             )
-            
+
+            # Initialize gap analysis after loading data
+            if self.config['analysis']['gap_analysis']['enabled']:
+                self._initialize_gap_analysis()
+   
         except Exception as e:
             raise ValueError(f"Data loading failed: {str(e)}")
 ####################
@@ -329,6 +333,24 @@ class LotteryAnalyzer:
         
         query = "SELECT number FROM number_gaps WHERE is_overdue = TRUE"
         return [row[0] for row in self.conn.execute(query)]
+        
+    def _recalculate_avg_gaps(self):
+        """Recalculate average gaps for all numbers"""
+        self.conn.execute("""
+            UPDATE number_gaps
+            SET avg_gap = (
+                SELECT AVG(gap) FROM (
+                    SELECT julianday(d1.date) - julianday(d2.date) as gap
+                    FROM draws d1
+                    JOIN draws d2 ON d1.date > d2.date
+                    WHERE ? IN (d1.n1,d1.n2,d1.n3,d1.n4,d1.n5,d1.n6)
+                      AND ? IN (d2.n1,d2.n2,d2.n3,d2.n4,d2.n5,d2.n6)
+                    ORDER BY d1.date DESC
+                    LIMIT 10
+                )
+            )
+            WHERE number = ?
+        """, [(n,n,n) for n in self.number_pool])
 #======================
 # Start Set generator
 #======================
@@ -1022,31 +1044,61 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
+    def _initialize_gap_analysis(self):
+        """Populate number_gaps table with initial data"""
+        # Clear existing data
+        self.conn.execute("DELETE FROM number_gaps")
+        
+        # Insert all numbers from pool
+        self.conn.executemany(
+            "INSERT INTO number_gaps (number) VALUES (?)",
+            [(n,) for n in self.number_pool]
+        )
+        
+        # Calculate initial gaps
+        self._update_all_gaps()
+
+###############
     def update_gap_stats(self):
-        """Run after loading new draw data"""
-        # Calculate gaps for all numbers
+        """Update gap statistics after new draws"""
+        if not self.config['analysis']['gap_analysis']['enabled']:
+            return
+            
+        # Get latest draw date and numbers
+        latest = self.conn.execute(
+            "SELECT date, n1, n2, n3, n4, n5, n6 FROM draws ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        
+        if not latest:
+            return
+            
+        latest_date, *latest_nums = latest
+        
+        # Update gaps for all numbers
         self.conn.execute("""
             UPDATE number_gaps 
-            SET 
-                current_gap = current_gap + 1,
-                is_overdue = CASE 
+            SET current_gap = current_gap + 1,
+                is_overdue = CASE
                     WHEN ? = 'manual' THEN current_gap + 1 >= ?
                     ELSE current_gap + 1 >= avg_gap * ?
                 END
-        """, (self.config['gap_analysis']['mode'], 
-              self.config['gap_analysis']['manual_threshold'],
-              self.config['gap_analysis']['auto_threshold']))
+        """, (
+            self.config['gap_analysis']['mode'],
+            self.config['gap_analysis']['manual_threshold'],
+            self.config['gap_analysis']['auto_threshold']
+        ))
         
         # Reset gaps for numbers in latest draw
-        nums_in_draw = [...]  # Extract from current draw
         self.conn.executemany("""
             UPDATE number_gaps 
-            SET 
-                last_seen_date = ?,
+            SET last_seen_date = ?,
                 current_gap = 0,
                 is_overdue = FALSE
             WHERE number = ?
-        """, [(draw_date, num) for num in nums_in_draw])
+        """, [(latest_date, num) for num in latest_nums])
+        
+        # Recalculate average gaps
+        self._recalculate_avg_gaps()
 
 ###########################################################################
 ########################
