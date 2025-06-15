@@ -538,84 +538,84 @@ class LotteryAnalyzer:
 ########################
 
     def get_number_ranges_stats(self) -> dict:
-    """Three-way number range analysis (Low-Mid-High)"""
-    try:
-        cfg = self.config['analysis']['number_ranges']
-        pool_size = self.config['strategy']['number_pool']
-        
-        # Auto-adjust ranges if configured
-        if cfg.get('dynamic_ranges', False):
-            low_max = pool_size // 3
-            mid_max = 2 * (pool_size // 3)
-        else:
-            low_max = cfg['low_max']
-            mid_max = cfg['mid_max']
-        
-        draw_limit = self._get_analysis_draw_limit('number_ranges', 500)
-        
-        query = f"""
-        WITH recent_draws AS (
-            SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
-        ),
-        range_flags AS (
+        """Three-way number range analysis (Low-Mid-High)"""
+        try:
+            cfg = self.config['analysis']['number_ranges']
+            pool_size = self.config['strategy']['number_pool']
+            
+            # Auto-adjust ranges if configured
+            if cfg.get('dynamic_ranges', False):
+                low_max = pool_size // 3
+                mid_max = 2 * (pool_size // 3)
+            else:
+                low_max = cfg['low_max']
+                mid_max = cfg['mid_max']
+            
+            draw_limit = self._get_analysis_draw_limit('number_ranges', 500)
+            
+            query = f"""
+            WITH recent_draws AS (
+                SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
+            ),
+            range_flags AS (
+                SELECT 
+                    date,
+                    -- Low numbers
+                    CASE WHEN n1 <= {low_max} OR n2 <= {low_max} OR 
+                              n3 <= {low_max} OR n4 <= {low_max} OR
+                              n5 <= {low_max} OR n6 <= {low_max} 
+                         THEN 1 ELSE 0 END as has_low,
+                    -- Mid numbers
+                    CASE WHEN (n1 > {low_max} AND n1 <= {mid_max}) OR 
+                              (n2 > {low_max} AND n2 <= {mid_max}) OR
+                              (n3 > {low_max} AND n3 <= {mid_max}) OR
+                              (n4 > {low_max} AND n4 <= {mid_max}) OR
+                              (n5 > {low_max} AND n5 <= {mid_max}) OR
+                              (n6 > {low_max} AND n6 <= {mid_max})
+                         THEN 1 ELSE 0 END as has_mid,
+                    -- High numbers
+                    CASE WHEN n1 > {mid_max} OR n2 > {mid_max} OR 
+                              n3 > {mid_max} OR n4 > {mid_max} OR
+                              n5 > {mid_max} OR n6 > {mid_max}
+                         THEN 1 ELSE 0 END as has_high
+                FROM recent_draws
+            )
             SELECT 
-                date,
-                -- Low numbers
-                CASE WHEN n1 <= {low_max} OR n2 <= {low_max} OR 
-                          n3 <= {low_max} OR n4 <= {low_max} OR
-                          n5 <= {low_max} OR n6 <= {low_max} 
-                     THEN 1 ELSE 0 END as has_low,
-                -- Mid numbers
-                CASE WHEN (n1 > {low_max} AND n1 <= {mid_max}) OR 
-                          (n2 > {low_max} AND n2 <= {mid_max}) OR
-                          (n3 > {low_max} AND n3 <= {mid_max}) OR
-                          (n4 > {low_max} AND n4 <= {mid_max}) OR
-                          (n5 > {low_max} AND n5 <= {mid_max}) OR
-                          (n6 > {low_max} AND n6 <= {mid_max})
-                     THEN 1 ELSE 0 END as has_mid,
-                -- High numbers
-                CASE WHEN n1 > {mid_max} OR n2 > {mid_max} OR 
-                          n3 > {mid_max} OR n4 > {mid_max} OR
-                          n5 > {mid_max} OR n6 > {mid_max}
-                     THEN 1 ELSE 0 END as has_high
-            FROM recent_draws
-        )
-        SELECT 
-            AVG(has_low) * 100 as pct_low,
-            AVG(has_mid) * 100 as pct_mid,
-            AVG(has_high) * 100 as pct_high,
-            SUM(has_low) as low_draws,
-            SUM(has_mid) as mid_draws,
-            SUM(has_high) as high_draws,
-            COUNT(*) as total_draws,
-            {low_max} as low_max,
-            {mid_max} as mid_max
-        FROM range_flags
-        """
-        result = self.conn.execute(query).fetchone()
-        
-        return {
-            'ranges': {
-                'low': f"1-{result[7]}",
-                'mid': f"{result[7]+1}-{result[8]}", 
-                'high': f"{result[8]+1}-{pool_size}"
-            },
-            'percentages': {
-                'low': round(result[0], 1),
-                'mid': round(result[1], 1),
-                'high': round(result[2], 1)
-            },
-            'counts': {
-                'low': result[3],
-                'mid': result[4],
-                'high': result[5]
-            },
-            'total_draws': result[6]
-        }
-        
-    except Exception as e:
-        logging.error(f"Range analysis failed: {str(e)}")
-        return {'error': 'Range analysis failed'}
+                AVG(has_low) * 100 as pct_low,
+                AVG(has_mid) * 100 as pct_mid,
+                AVG(has_high) * 100 as pct_high,
+                SUM(has_low) as low_draws,
+                SUM(has_mid) as mid_draws,
+                SUM(has_high) as high_draws,
+                COUNT(*) as total_draws,
+                {low_max} as low_max,
+                {mid_max} as mid_max
+            FROM range_flags
+            """
+            result = self.conn.execute(query).fetchone()
+            
+            return {
+                'ranges': {
+                    'low': f"1-{result[7]}",
+                    'mid': f"{result[7]+1}-{result[8]}", 
+                    'high': f"{result[8]+1}-{pool_size}"
+                },
+                'percentages': {
+                    'low': round(result[0], 1),
+                    'mid': round(result[1], 1),
+                    'high': round(result[2], 1)
+                },
+                'counts': {
+                    'low': result[3],
+                    'mid': result[4],
+                    'high': result[5]
+                },
+                'total_draws': result[6]
+            }
+            
+        except Exception as e:
+            logging.error(f"Range analysis failed: {str(e)}")
+            return {'error': 'Range analysis failed'}
 
 ########################
     def get_combination_stats(self, size: int) -> Dict:
