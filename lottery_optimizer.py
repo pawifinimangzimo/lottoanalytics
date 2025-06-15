@@ -1519,8 +1519,8 @@ def main():
         analyzer = LotteryAnalyzer(config)
         # Load and validate data
         analyzer.load_data()
-        if analyzer.config['analysis']['gap_analysis']['enabled']:
-            analyzer.debug_gap_status()
+        #if analyzer.config['analysis']['gap_analysis']['enabled']:
+        #    analyzer.debug_gap_status()
         # Get analysis results
         freqs = analyzer.get_frequencies()
         temps = analyzer.get_temperature_stats()
