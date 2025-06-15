@@ -328,6 +328,18 @@ class LotteryAnalyzer:
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers         
 
+    def debug_gap_status(self):
+        """Temporary method to debug gap analysis"""
+        query = """
+        SELECT number, current_gap, avg_gap, is_overdue 
+        FROM number_gaps 
+        WHERE is_overdue = TRUE OR current_gap > avg_gap
+        ORDER BY current_gap DESC
+        """
+        df = pd.read_sql(query, self.conn)
+        print("\nGAP ANALYSIS DEBUG:")
+        print(df.to_string())
+
     def _validate_gap_analysis_config(self):
         """Ensure gap_analysis config has all required fields"""
         gap_config = self.config.setdefault('analysis', {}).setdefault('gap_analysis', {})
@@ -1463,7 +1475,8 @@ def main():
         analyzer = LotteryAnalyzer(config)
         # Load and validate data
         analyzer.load_data()
-
+        if analyzer.config['analysis']['gap_analysis']['enabled']:
+            analyzer.debug_gap_status()
         # Get analysis results
         freqs = analyzer.get_frequencies()
         temps = analyzer.get_temperature_stats()
