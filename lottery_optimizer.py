@@ -344,7 +344,6 @@ class LotteryAnalyzer:
                 return False, [f"Sum: {total} (Below minimum {int(q1 - margin)})"]
             if total > (q3 + margin):
                 return False, [f"Sum: {total} (Above maximum {int(q3 + margin)})"]
-            notes.append(f"Sum: {total} (Optimal range: {int(q1)}-{int(q3)})")
 
             # Insert percentile calculation here (new code)
             if self.config['output'].get('show_percentiles', True):
