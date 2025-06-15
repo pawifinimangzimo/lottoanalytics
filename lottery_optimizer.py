@@ -1107,12 +1107,12 @@ class LotteryAnalyzer:
                     last_seen,
                     gap,
                     avg_gap,
-                    self.config['gap_analysis']['mode'],
+                    self.config['analysis']['gap_analysis']['mode'],
                     gap,
-                    self.config['gap_analysis']['manual_threshold'],
+                    self.config['analysis']['gap_analysis']['manual_threshold'],
                     gap,
                     avg_gap,
-                    self.config['gap_analysis']['auto_threshold'],
+                    self.config['analysis']['gap_analysis']['auto_threshold'],
                     num
                 ))
 
@@ -1141,9 +1141,9 @@ class LotteryAnalyzer:
                     ELSE current_gap + 1 >= avg_gap * ?
                 END
         """, (
-            self.config['gap_analysis']['mode'],
-            self.config['gap_analysis']['manual_threshold'],
-            self.config['gap_analysis']['auto_threshold']
+            self.config['analysis']['gap_analysis']['mode'],
+            self.config['analysis']['gap_analysis']['manual_threshold'],
+            self.config['analysis']['gap_analysis']['auto_threshold']
         ))
         
         # Reset gaps for numbers in latest draw
