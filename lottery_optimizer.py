@@ -370,6 +370,15 @@ class LotteryAnalyzer:
         gap_config.setdefault('bin_size', 5) 
         
     def _get_overdue_numbers(self) -> List[int]:
+        debug_sql = """
+        EXPLAIN QUERY PLAN
+        SELECT number FROM number_gaps WHERE is_overdue = TRUE
+        """
+        plan = self.conn.execute(debug_sql).fetchall()
+        print("\n🔍 Query Plan for is_overdue access:")
+        for line in plan:
+            print(line)
+
         """Return list of numbers marked as overdue in number_gaps table"""
         if not self.config['analysis']['gap_analysis']['enabled']:
             return []
