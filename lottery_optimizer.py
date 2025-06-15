@@ -329,6 +329,65 @@ class LotteryAnalyzer:
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers
 
+    def _atomic_gap_check(self):
+        """Thread-safe schema verification"""
+        with self.conn:
+            # Create table if not exists
+            self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS number_gaps (
+                number INTEGER PRIMARY KEY,
+                last_seen_date TEXT,
+                current_gap INTEGER DEFAULT 0,
+                avg_gap REAL,
+                max_gap INTEGER,
+                is_overdue BOOLEAN DEFAULT FALSE
+            )""")
+            
+            # SQLite doesn't support IF NOT EXISTS for columns, so try/except
+            try:
+                self.conn.execute("SELECT is_overdue FROM number_gaps LIMIT 1")
+            except sqlite3.OperationalError:
+                self.conn.execute("ALTER TABLE number_gaps ADD COLUMN is_overdue BOOLEAN DEFAULT FALSE")
+            
+            # Ensure index exists
+            self.conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue)
+            """)
+
+    def _nuclear_repair(self):
+        """Complete table reconstruction"""
+        with self.conn:
+            # Backup existing data
+            try:
+                backup = self.conn.execute("""
+                    SELECT number, last_seen_date, current_gap, avg_gap 
+                    FROM number_gaps
+                """).fetchall()
+            except:
+                backup = []
+            
+            # Rebuild schema
+            self.conn.executescript("""
+            DROP TABLE IF EXISTS number_gaps;
+            CREATE TABLE number_gaps (
+                number INTEGER PRIMARY KEY,
+                last_seen_date TEXT,
+                current_gap INTEGER DEFAULT 0,
+                avg_gap REAL,
+                max_gap INTEGER,
+                is_overdue BOOLEAN DEFAULT FALSE
+            );
+            CREATE INDEX idx_overdue ON number_gaps(is_overdue);
+            """)
+            
+            # Restore data
+            if backup:
+                self.conn.executemany("""
+                INSERT INTO number_gaps 
+                (number, last_seen_date, current_gap, avg_gap)
+                VALUES (?, ?, ?, ?)
+                """, backup)
+
     def _repair_schema(self):
         """Completely rebuild the table if corrupted"""
         print("\n⚙️ Rebuilding number_gaps table...")
@@ -1167,13 +1226,43 @@ class LotteryAnalyzer:
 ############### GAP ANALYSIS #####################################
 
     def get_formatted_gap_analysis(self) -> dict:
-        """Package all gap data for CLI output"""
+        """Package all gap data for CLI output with atomic schema validation"""
         if not self.config['analysis']['gap_analysis']['enabled']:
             return {}
-        
-        stats = self.get_gap_stats()
-        distribution = self.get_gap_distribution()
-        overdue = self.get_overdue_numbers(enhanced=True)
+
+        # 1. Atomic schema verification
+        try:
+            self._atomic_gap_check()  # Ensure schema exists
+        except sqlite3.Error as e:
+            logging.error(f"Schema verification failed: {str(e)}")
+            return {}
+
+        # 2. Get data with error handling
+        try:
+            stats = self.get_gap_stats()
+            distribution = self.get_gap_distribution()
+            overdue = self.get_overdue_numbers(enhanced=True)
+            
+            return {
+                'most_overdue': overdue[0] if overdue else None,
+                'average_gap': stats.get('average_gap', 0),
+                'distribution': distribution,
+                'overdue_count': stats.get('overdue_count', 0),
+                '_schema_valid': True  # Debug flag
+            }
+            
+        except sqlite3.OperationalError as e:
+            if "no such column" in str(e):
+                logging.warning("Gap schema corrupted, attempting repair...")
+                self._nuclear_repair()
+                return self.get_formatted_gap_analysis()  # Retry once
+            raise
+        except Exception as e:
+            logging.error(f"Unexpected gap analysis error: {str(e)}")
+            return {
+                'error': str(e),
+                '_schema_valid': False
+            }
         
         return {
             'most_overdue': overdue[0] if overdue else None,
