@@ -537,71 +537,85 @@ class LotteryAnalyzer:
 
 ########################
 
-    def get_highlow_stats(self) -> dict:
-        try:
-            cfg = self.config['analysis']['high_low']
-            draw_limit = max(1, self._get_analysis_draw_limit('high_low', cfg.get('draws', 400)))
-            low_max = cfg['low_number_max']
-            
-            query = f"""
-            WITH recent_draws AS (
-                SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
-            ),
-            number_flags AS (
-                SELECT date,
-                    CASE WHEN n1 <= {low_max} OR n2 <= {low_max} OR 
-                              n3 <= {low_max} OR n4 <= {low_max} OR
-                              n5 <= {low_max} OR n6 <= {low_max} 
-                         THEN 1 ELSE 0 END as has_low,
-                    CASE WHEN n1 > {low_max} OR n2 > {low_max} OR 
-                              n3 > {low_max} OR n4 > {low_max} OR
-                              n5 > {low_max} OR n6 > {low_max} 
-                         THEN 1 ELSE 0 END as has_high
-                FROM recent_draws
-            )
-            SELECT 
-                AVG(has_low) * 100 as pct_with_low,
-                AVG(has_high) * 100 as pct_with_high,
-                SUM(has_low) as low_draws,
-                SUM(has_high) as high_draws,
-                COUNT(*) as total_draws,
-                {low_max} as low_threshold
-            FROM number_flags
-            """
-            result = self.conn.execute(query).fetchone()
-            
-            stats = {
-                'pct_with_low': round(result[0], self.config['output']['high_low'].get('decimal_places', 1)),
-                'pct_with_high': round(result[1], self.config['output']['high_low'].get('decimal_places', 1)),
-                'low_draws': result[2],
-                'high_draws': result[3],
-                'total_draws': result[4],
-                'low_threshold': result[5],
-                'ratio': round(result[1]/result[0], 2) if result[0] > 0 else 0
-            }
-            
-            if cfg.get('enable_ratio_analysis', False):
-                stats['ratio_alert'] = self._check_ratio_deviation(stats['ratio'])
-                
-            return stats
-            
-        except Exception as e:
-            logging.error(f"High-low stats failed: {str(e)}")
-            return {'error': 'High-low analysis failed'}
-
-    def _check_ratio_deviation(self, current_ratio: float) -> str:
-        """Check if ratio deviates significantly from historical average"""
-        historical = self._get_historical_ratio()
-        threshold = self.config['analysis']['high_low'].get('alert_threshold', 0.15)
+    def get_number_ranges_stats(self) -> dict:
+    """Three-way number range analysis (Low-Mid-High)"""
+    try:
+        cfg = self.config['analysis']['number_ranges']
+        pool_size = self.config['strategy']['number_pool']
         
-        if not historical:
-            return "No historical data for comparison"
-            
-        deviation = abs(current_ratio - historical) / historical
-        if deviation > threshold:
-            direction = "higher" if current_ratio > historical else "lower"
-            return f"Warning: Current ratio is {deviation*100:.1f}% {direction} than historical average"
-        return None
+        # Auto-adjust ranges if configured
+        if cfg.get('dynamic_ranges', False):
+            low_max = pool_size // 3
+            mid_max = 2 * (pool_size // 3)
+        else:
+            low_max = cfg['low_max']
+            mid_max = cfg['mid_max']
+        
+        draw_limit = self._get_analysis_draw_limit('number_ranges', 500)
+        
+        query = f"""
+        WITH recent_draws AS (
+            SELECT * FROM draws ORDER BY date DESC LIMIT {draw_limit}
+        ),
+        range_flags AS (
+            SELECT 
+                date,
+                -- Low numbers
+                CASE WHEN n1 <= {low_max} OR n2 <= {low_max} OR 
+                          n3 <= {low_max} OR n4 <= {low_max} OR
+                          n5 <= {low_max} OR n6 <= {low_max} 
+                     THEN 1 ELSE 0 END as has_low,
+                -- Mid numbers
+                CASE WHEN (n1 > {low_max} AND n1 <= {mid_max}) OR 
+                          (n2 > {low_max} AND n2 <= {mid_max}) OR
+                          (n3 > {low_max} AND n3 <= {mid_max}) OR
+                          (n4 > {low_max} AND n4 <= {mid_max}) OR
+                          (n5 > {low_max} AND n5 <= {mid_max}) OR
+                          (n6 > {low_max} AND n6 <= {mid_max})
+                     THEN 1 ELSE 0 END as has_mid,
+                -- High numbers
+                CASE WHEN n1 > {mid_max} OR n2 > {mid_max} OR 
+                          n3 > {mid_max} OR n4 > {mid_max} OR
+                          n5 > {mid_max} OR n6 > {mid_max}
+                     THEN 1 ELSE 0 END as has_high
+            FROM recent_draws
+        )
+        SELECT 
+            AVG(has_low) * 100 as pct_low,
+            AVG(has_mid) * 100 as pct_mid,
+            AVG(has_high) * 100 as pct_high,
+            SUM(has_low) as low_draws,
+            SUM(has_mid) as mid_draws,
+            SUM(has_high) as high_draws,
+            COUNT(*) as total_draws,
+            {low_max} as low_max,
+            {mid_max} as mid_max
+        FROM range_flags
+        """
+        result = self.conn.execute(query).fetchone()
+        
+        return {
+            'ranges': {
+                'low': f"1-{result[7]}",
+                'mid': f"{result[7]+1}-{result[8]}", 
+                'high': f"{result[8]+1}-{pool_size}"
+            },
+            'percentages': {
+                'low': round(result[0], 1),
+                'mid': round(result[1], 1),
+                'high': round(result[2], 1)
+            },
+            'counts': {
+                'low': result[3],
+                'mid': result[4],
+                'high': result[5]
+            },
+            'total_draws': result[6]
+        }
+        
+    except Exception as e:
+        logging.error(f"Range analysis failed: {str(e)}")
+        return {'error': 'Range analysis failed'}
 
 ########################
     def get_combination_stats(self, size: int) -> Dict:
@@ -1080,12 +1094,13 @@ def main():
 
 ######## HIGH LOW ###############
 
-        high_low = analyzer.get_highlow_stats()
-        if high_low and not args.quiet:
-            print(f"\n⬆⬇ High-Low Analysis (Low ≤{high_low['low_threshold']}, High >{high_low['low_threshold']}):")
-            print(f"  - Low numbers in {high_low['pct_with_low']}% of draws")
-            print(f"  - High numbers in {high_low['pct_with_high']}% of draws")
-            print(f"  - {high_low['low_draws']} low and {high_low['high_draws']} high of last {high_low['total_draws']} draws")
+        range_stats = analyzer.get_number_ranges_stats()
+        if not range_stats.get('error'):
+            print(f"\n🔢 Number Ranges Analysis:")
+            print(f"   - Low ({range_stats['ranges']['low']}): {range_stats['percentages']['low']}% ({range_stats['counts']['low']} draws)")
+            print(f"   - Mid ({range_stats['ranges']['mid']}): {range_stats['percentages']['mid']}% ({range_stats['counts']['mid']} draws)") 
+            print(f"   - High ({range_stats['ranges']['high']}): {range_stats['percentages']['high']}% ({range_stats['counts']['high']} draws)")
+            print(f"   Total analyzed: {range_stats['total_draws']} draws")
 ##############################################
 #==================
 # New Section
