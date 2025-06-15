@@ -1104,7 +1104,7 @@ class LotteryAnalyzer:
         
         # 3. Calculate initial gaps for existing numbers
         for num in existing_nums:
-            # Get all appearance dates for this number (sorted chronologically)
+            # Get all appearance dates for this number
             dates = self.conn.execute("""
                 SELECT date FROM draws
                 WHERE ? IN (n1,n2,n3,n4,n5,n6)
@@ -1114,11 +1114,11 @@ class LotteryAnalyzer:
             if not dates:
                 continue
                 
-            # Convert dates from MM/DD/YYYY to datetime objects
+            # Convert dates from YYYY/MM/DD to datetime objects
             date_objs = []
             for d in dates:
                 try:
-                    date_objs.append(datetime.strptime(d[0], '%m/%d/%Y'))  # Note: %Y for 4-digit year
+                    date_objs.append(datetime.strptime(d[0], '%Y/%m/%d'))  # Changed to YYYY/MM/DD
                 except ValueError as e:
                     print(f"⚠️ Failed to parse date {d[0]} for number {num}: {e}")
                     continue
@@ -1132,7 +1132,7 @@ class LotteryAnalyzer:
             latest_date_str = self.conn.execute(
                 "SELECT MAX(date) FROM draws"
             ).fetchone()[0]
-            latest_date = datetime.strptime(latest_date_str, '%m/%d/%Y')
+            latest_date = datetime.strptime(latest_date_str, '%Y/%m/%d')
             current_gap = (latest_date - date_objs[-1]).days
             
             # Calculate historical average gap (in days)
