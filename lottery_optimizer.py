@@ -416,6 +416,29 @@ class LotteryAnalyzer:
             return hot + cold + random_nums.tolist()
         # ... other strategies ...
 
+    def _generate_candidate(self, strategy: str = None) -> List[int]:
+        """Consolidated candidate generator (replace any variants)"""
+        if strategy == 'balanced':
+            hot = self.get_temperature_stats()['hot'][:3]
+            cold = self.get_temperature_stats()['cold'][:2]
+            remaining = self.config['strategy']['numbers_to_select'] - len(hot) - len(cold)
+            random_nums = np.random.choice(
+                [n for n in self.number_pool if n not in hot + cold],
+                size=remaining,
+                replace=False
+            )
+            return hot + cold + random_nums.tolist()
+        elif strategy == 'frequent':
+            top_n = self.config['strategy']['numbers_to_select']
+            freqs = self.get_frequencies()
+            return freqs.head(top_n).index.tolist()
+        else:  # Fallback strategy
+            return sorted(np.random.choice(
+                self.number_pool,
+                size=self.config['strategy']['numbers_to_select'],
+                replace=False
+            ))
+
     def _generate_fallback_set(self) -> List[int]:
         """Fallback if sum validation fails too often."""
         return sorted(np.random.choice(
