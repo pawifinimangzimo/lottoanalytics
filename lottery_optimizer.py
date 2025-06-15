@@ -1037,7 +1037,7 @@ class LotteryAnalyzer:
                 self._get_draw_count()  # Or specific limit if needed
         
         return results
- 
+
 
 ############ SUMMARY ANALYSIS ######################
 
