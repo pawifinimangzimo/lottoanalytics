@@ -66,6 +66,7 @@ class LotteryAnalyzer:
         
         self._validate_gap_analysis_config()  # Add this line
         self.conn = self._init_db()
+        self.verify_schema()
         self._init_mode_handler()  # Add this line
 
         self._prepare_filesystem()
@@ -326,8 +327,62 @@ class LotteryAnalyzer:
         """
         low_max = self.config['analysis']['high_low']['low_number_max']
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
-# Helpers         
+# Helpers
 
+    def _repair_schema(self):
+        """Completely rebuild the table if corrupted"""
+        print("\n⚙️ Rebuilding number_gaps table...")
+        
+        # Backup existing data
+        try:
+            old_data = self.conn.execute("SELECT * FROM number_gaps").fetchall()
+        except sqlite3.Error:
+            old_data = []
+        
+        # Drop and recreate table
+        self.conn.executescript("""
+        DROP TABLE IF EXISTS number_gaps;
+        CREATE TABLE number_gaps (
+            number INTEGER PRIMARY KEY,
+            last_seen_date TEXT,
+            current_gap INTEGER DEFAULT 0,
+            avg_gap REAL,
+            max_gap INTEGER,
+            is_overdue BOOLEAN DEFAULT FALSE
+        );
+        CREATE INDEX idx_overdue ON number_gaps(is_overdue);
+        """)
+        
+        # Restore data if available
+        if old_data:
+            self.conn.executemany("""
+            INSERT INTO number_gaps VALUES (?,?,?,?,?,?)
+            """, old_data)
+        
+        self.conn.commit()
+        print("🟢 Schema repair complete")
+         
+    def verify_schema(self):
+        """Thoroughly verify the database schema matches expectations"""
+        # Check if table exists
+        table_exists = self.conn.execute("""
+        SELECT count(*) FROM sqlite_master 
+        WHERE type='table' AND name='number_gaps'
+        """).fetchone()[0]
+        
+        if not table_exists:
+            raise RuntimeError("number_gaps table does not exist")
+
+        # Check for is_overdue column
+        columns = [col[1] for col in 
+                  self.conn.execute("PRAGMA table_info(number_gaps)")]
+        
+        if 'is_overdue' not in columns:
+            print("\n🔴 Critical: is_overdue column missing!")
+            print("Existing columns:", columns)
+            self._repair_schema()
+        else:
+            print("\n🟢 Schema verified: is_overdue exists")
 
     def _verify_gap_analysis(self):
         """Verify gap analysis data exists"""
@@ -370,6 +425,16 @@ class LotteryAnalyzer:
         gap_config.setdefault('bin_size', 5) 
         
     def _get_overdue_numbers(self) -> List[int]:
+    
+            """Safe version with automatic schema validation"""
+        try:
+            # Quick check before proceeding
+            self.conn.execute("SELECT is_overdue FROM number_gaps LIMIT 1")
+        except sqlite3.OperationalError:
+            print("\n⚠️ Schema issue detected - attempting repair...")
+            self.verify_schema()
+            return self.get_overdue_numbers(enhanced)  # Retry
+    
         debug_sql = """
         EXPLAIN QUERY PLAN
         SELECT number FROM number_gaps WHERE is_overdue = TRUE
