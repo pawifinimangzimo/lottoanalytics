@@ -328,6 +328,24 @@ class LotteryAnalyzer:
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers         
 
+    def _verify_gap_analysis(self):
+        """Verify gap analysis data exists"""
+        # Check if any gaps recorded at all
+        total_numbers = self.conn.execute(
+            "SELECT COUNT(*) FROM number_gaps"
+        ).fetchone()[0]
+        
+        # Check max gaps recorded
+        max_gap = self.conn.execute(
+            "SELECT MAX(current_gap) FROM number_gaps"
+        ).fetchone()[0]
+        
+        print(f"\nGAP ANALYSIS VERIFICATION:")
+        print(f"Total numbers tracked: {total_numbers}/{self.config['strategy']['number_pool']}")
+        print(f"Max current gap: {max_gap}")
+        print(f"Thresholds: Auto={self.config['analysis']['gap_analysis']['auto_threshold']}x avg, Manual={self.config['analysis']['gap_analysis']['manual_threshold']} draws")
+
+
     def debug_gap_status(self):
         """Temporary method to debug gap analysis"""
         query = """
