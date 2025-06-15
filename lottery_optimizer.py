@@ -426,24 +426,6 @@ class LotteryAnalyzer:
         
     def _get_overdue_numbers(self) -> List[int]:
     
-            """Safe version with automatic schema validation"""
-        try:
-            # Quick check before proceeding
-            self.conn.execute("SELECT is_overdue FROM number_gaps LIMIT 1")
-        except sqlite3.OperationalError:
-            print("\n⚠️ Schema issue detected - attempting repair...")
-            self.verify_schema()
-            return self.get_overdue_numbers(enhanced)  # Retry
-    
-        debug_sql = """
-        EXPLAIN QUERY PLAN
-        SELECT number FROM number_gaps WHERE is_overdue = TRUE
-        """
-        plan = self.conn.execute(debug_sql).fetchall()
-        print("\n🔍 Query Plan for is_overdue access:")
-        for line in plan:
-            print(line)
-
         """Return list of numbers marked as overdue in number_gaps table"""
         if not self.config['analysis']['gap_analysis']['enabled']:
             return []
