@@ -67,6 +67,9 @@ analysis:
     manual_threshold: 10     # Fixed draw count (if mode: manual)
     weight_influence: 0.3    # How much gaps affect set generation (0-1)
     min_avg_gap: 5           # Ignore frequent numbers
+    trend_lookback: 10    # For trend analysis
+    bin_size: 5           # For distribution charts
+    acceleration_threshold: 0.5
 
   combined_stats_settings:
     min_overlap_significance: 0.5

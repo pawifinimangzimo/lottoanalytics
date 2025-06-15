@@ -1004,6 +1004,11 @@ class LotteryAnalyzer:
             }
         """
         return {
+        
+            'gap_analysis': {
+                'stats': self.get_gap_stats(),
+                'distribution': self.get_gap_distribution()
+            }
             'frequency': self.get_frequencies(),
             'primes': self.get_prime_stats(),
             'high_low': self.get_highlow_stats(),
@@ -1085,10 +1090,122 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
-    def get_overdue_numbers(self) -> List[int]:
-        """Get numbers marked as overdue in gap analysis"""
+    def simulate_gap_thresholds(self):
+        """Test different threshold values"""
+        results = []
+        for threshold in [1.3, 1.5, 1.7, 2.0]:
+            self.config['analysis']['gap_analysis']['auto_threshold'] = threshold
+            self._initialize_gap_analysis()
+            overdue = self.get_overdue_numbers()
+            results.append({
+                'threshold': threshold,
+                'count': len(overdue),
+                'accuracy': self._test_gap_accuracy(overdue)
+            })
+        return results
+
+    def _test_gap_accuracy(self, numbers: List[int]) -> float:
+        """Check if overdue numbers actually appeared soon after"""
+        query = """
+        SELECT COUNT(*) FROM draws
+        WHERE ? IN (n1,n2,n3,n4,n5,n6)
+        AND date BETWEEN date(?) AND date(?, '+7 days')
+        """
+        hits = 0
+        for num in numbers:
+            last_seen = self.conn.execute(
+                "SELECT last_seen_date FROM number_gaps WHERE number = ?", (num,)
+            ).fetchone()[0]
+            hits += self.conn.execute(query, (num, last_seen, last_seen)).fetchone()[0]
+        return hits / len(numbers) if numbers else 0
+
+    def get_gap_trends(self, num: int, lookback=10) -> dict:
+        """Calculate gap trend for a specific number"""
+        query = """
+        WITH appearances AS (
+            SELECT date FROM draws
+            WHERE ? IN (n1,n2,n3,n4,n5,n6)
+            ORDER BY date DESC
+            LIMIT ?
+        ),
+        gaps AS (
+            SELECT 
+                julianday(a.date) - julianday(b.date) as gap
+            FROM appearances a
+            JOIN appearances b ON a.date > b.date
+            LIMIT ?
+        )
+        SELECT 
+            AVG(gap),
+            (MAX(gap) - MIN(gap)) / COUNT(*)
+        FROM gaps
+        """
+        avg_gap, trend = self.conn.execute(query, (num, lookback, lookback)).fetchone()
+        return {
+            'number': num,
+            'current_gap': self.conn.execute(
+                "SELECT current_gap FROM number_gaps WHERE number = ?", (num,)
+            ).fetchone()[0],
+            'trend_slope': round(trend, 2),
+            'is_accelerating': trend > 0.5  # Custom threshold
+        }
+
+    def get_gap_stats(self) -> dict:
+        """Calculate comprehensive gap statistics"""
+        query = """
+        WITH gap_stats AS (
+            SELECT 
+                number,
+                current_gap,
+                avg_gap,
+                CAST((julianday('now') - julianday(last_seen_date)) AS INTEGER) as days_since_seen
+            FROM number_gaps
+        )
+        SELECT 
+            AVG(current_gap) as avg_gap,
+            MIN(current_gap) as min_gap,
+            MAX(current_gap) as max_gap,
+            AVG(days_since_seen) as avg_days_since,
+            SUM(CASE WHEN is_overdue THEN 1 ELSE 0 END) as overdue_count
+        FROM gap_stats
+        """
+        result = self.conn.execute(query).fetchone()
+        return {
+            'average_gap': round(result[0], 1),
+            'min_gap': result[1],
+            'max_gap': result[2],
+            'avg_days_since_seen': round(result[3], 1),
+            'overdue_count': result[4]
+        }
+
+    def get_gap_distribution(self, bin_size=5) -> dict:
+        """Bin gaps into ranges for histogram"""
+        query = f"""
+        SELECT 
+            (current_gap / {bin_size}) * {bin_size} as lower_bound,
+            COUNT(*) as frequency
+        FROM number_gaps
+        GROUP BY (current_gap / {bin_size})
+        ORDER BY lower_bound
+        """
+        return {
+            f"{row[0]}-{row[0]+bin_size-1}": row[1] 
+            for row in self.conn.execute(query).fetchall()
+        }
+
+
+    def get_overdue_numbers(self, enhanced: bool = False) -> Union[List[int], List[dict]]:
+        """Get overdue numbers with optional enhanced analytics
+        
+        Args:
+            enhanced: If True, returns list of dicts with trend analysis
+            
+        Returns:
+            List[int] if enhanced=False (default)
+            List[dict] if enhanced=True {number: int, current_gap: int, trend_slope: float}
+        """
         if not self.config['analysis']['gap_analysis']['enabled']:
-            return []
+            return [] if not enhanced else [{}]
         
         query = """
         SELECT number FROM number_gaps 
@@ -1097,7 +1214,17 @@ class LotteryAnalyzer:
         LIMIT ?
         """
         top_n = self.config['analysis']['top_range']
-        return [row[0] for row in self.conn.execute(query, (top_n,))]
+        numbers = [row[0] for row in self.conn.execute(query, (top_n,))]
+        
+        if enhanced:
+            return [{
+                'number': num,
+                'current_gap': self.conn.execute(
+                    "SELECT current_gap FROM number_gaps WHERE number = ?", (num,)
+                ).fetchone()[0],
+                'trend_slope': self.get_gap_trends(num)['trend_slope']
+            } for num in numbers]
+        return numbers
 
 
     def _parse_date(self, date_str):
