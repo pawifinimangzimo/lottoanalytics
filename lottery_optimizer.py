@@ -367,7 +367,8 @@ class LotteryAnalyzer:
         gap_config.setdefault('auto_threshold', 1.5)
         gap_config.setdefault('manual_threshold', 10)
         gap_config.setdefault('weight_influence', 0.3)
-
+        gap_config.setdefault('bin_size', 5) 
+        
     def _get_overdue_numbers(self) -> List[int]:
         """Return list of numbers marked as overdue in number_gaps table"""
         if not self.config['analysis']['gap_analysis']['enabled']:
@@ -1109,6 +1110,37 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
+    def get_formatted_gap_analysis(self) -> dict:
+        """Package all gap data for CLI output"""
+        if not self.config['analysis']['gap_analysis']['enabled']:
+            return {}
+        
+        stats = self.get_gap_stats()
+        distribution = self.get_gap_distribution()
+        overdue = self.get_overdue_numbers(enhanced=True)
+        
+        return {
+            'most_overdue': overdue[0] if overdue else None,
+            'average_gap': stats['average_gap'],
+            'distribution': distribution,
+            'overdue_count': stats['overdue_count']
+        }
+
+    def _generate_gap_histogram(self, distribution: dict) -> str:
+        """Generate ASCII histogram from gap distribution"""
+        if not distribution:
+            return "No gap data available"
+        
+        max_count = max(distribution.values())
+        bin_size = int(list(distribution.keys())[0].split('-')[1]) - int(list(distribution.keys())[0].split('-')[0]) + 1
+        
+        lines = []
+        for bin_range, count in sorted(distribution.items()):
+            bar = '█' * int(20 * count / max_count)
+            lines.append(f"{bin_range.rjust(5)}: {bar.ljust(20)} {count} draws")
+        
+        return "\n".join(lines)
+
     def simulate_gap_thresholds(self):
         """Test different threshold values"""
         results = []
@@ -1197,8 +1229,9 @@ class LotteryAnalyzer:
             'overdue_count': result[4]
         }
 
-    def get_gap_distribution(self, bin_size=5) -> dict:
-        """Bin gaps into ranges for histogram"""
+    def get_gap_distribution(self) -> dict:
+        """Bin gaps into ranges using configured bin_size"""
+        bin_size = self.config['analysis']['gap_analysis']['bin_size']
         query = f"""
         SELECT 
             (current_gap / {bin_size}) * {bin_size} as lower_bound,
@@ -1211,7 +1244,6 @@ class LotteryAnalyzer:
             f"{row[0]}-{row[0]+bin_size-1}": row[1] 
             for row in self.conn.execute(query).fetchall()
         }
-
 
     def get_overdue_numbers(self, enhanced: bool = False) -> Union[List[int], List[dict]]:
         """Get overdue numbers with optional enhanced analytics
@@ -1728,7 +1760,19 @@ def main():
                 overdue_primes = [n for n in overdue if analyzer._is_prime(n)]
                 if overdue_primes:
                     print(f"   Primes: {', '.join(map(str, overdue_primes))}")
-
+####################### New Overd print ##############
+            if not args.quiet and analyzer.config['analysis']['gap_analysis']['enabled']:
+                gap_data = analyzer.get_formatted_gap_analysis()
+                if gap_data:
+                    print("\n⏰ Overdue Numbers Analysis:")
+                    if gap_data['most_overdue']:
+                        print(f"   - Most Overdue: {gap_data['most_overdue']['number']} "
+                              f"({gap_data['most_overdue']['current_gap']} draws, "
+                              f"{gap_data['most_overdue']['trend_slope']:+.1f} trend)")
+                    print(f"   - Average Gap: {gap_data['average_gap']:.1f} draws")
+                    print(f"   - Gap Distribution:")
+                    print(analyzer._generate_gap_histogram(gap_data['distribution']))
+######################################################
 ######## HIGH LOW ###############
 
         range_stats = analyzer.get_number_ranges_stats()
