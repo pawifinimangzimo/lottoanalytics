@@ -537,7 +537,7 @@ class LotteryAnalyzer:
 
 ########################
 
-     def get_highlow_stats(self) -> dict:
+    def get_highlow_stats(self) -> dict:
         try:
             cfg = self.config['analysis']['high_low']
             draw_limit = max(1, self._get_analysis_draw_limit('high_low', cfg.get('draws', 400)))
