@@ -1088,8 +1088,8 @@ class LotteryAnalyzer:
         if not self.config['analysis']['gap_analysis']['enabled']:
             return
             
-        print("\nINITIALIZING GAP ANALYSIS...")  # Debug line
-        
+        print("\nINITIALIZING GAP ANALYSIS...")
+
         # 1. Get all numbers that have ever appeared
         existing_nums = set()
         for i in range(1,7):
@@ -1104,60 +1104,64 @@ class LotteryAnalyzer:
         
         # 3. Calculate initial gaps for existing numbers
         for num in existing_nums:
-            # Get last seen date
-            last_seen = self.conn.execute("""
-                SELECT MAX(date) FROM draws
+            # Get all appearance dates for this number (sorted chronologically)
+            dates = self.conn.execute("""
+                SELECT date FROM draws
                 WHERE ? IN (n1,n2,n3,n4,n5,n6)
-            """, (num,)).fetchone()[0]
+                ORDER BY date
+            """, (num,)).fetchall()
             
-            if last_seen:
-                # Calculate current gap (draws since last seen)
-                gap = self.conn.execute("""
-                    SELECT COUNT(*) FROM draws
-                    WHERE date > ?
-                """, (last_seen,)).fetchone()[0]
+            if not dates:
+                continue
                 
-                # Calculate historical average gap
-                dates = self.conn.execute("""
-                    SELECT date FROM draws
-                    WHERE ? IN (n1,n2,n3,n4,n5,n6)
-                    ORDER BY date
-                """, (num,)).fetchall()
-                
-                if len(dates) > 1:
-                    avg_gap = sum(
-                        (dates[i+1][0] - dates[i][0]).days 
-                        for i in range(len(dates)-1)
-                    ) / (len(dates)-1)
-                else:
-                    avg_gap = gap
+            # Convert dates from MM/DD/YYYY to datetime objects
+            date_objs = []
+            for d in dates:
+                try:
+                    date_objs.append(datetime.strptime(d[0], '%m/%d/%Y'))  # Note: %Y for 4-digit year
+                except ValueError as e:
+                    print(f"⚠️ Failed to parse date {d[0]} for number {num}: {e}")
+                    continue
                     
-                # Update record
-                mode = self.config['analysis']['gap_analysis']['mode']
-                auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
-                manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
+            if not date_objs:
+                continue
                 
-                self.conn.execute("""
-                    UPDATE number_gaps
-                    SET last_seen_date = ?,
-                        current_gap = ?,
-                        avg_gap = ?,
-                        is_overdue = CASE
-                            WHEN ? = 'manual' THEN ? >= ?
-                            ELSE ? >= ? * ?
-                        END
-                    WHERE number = ?
-                """, (
-                    last_seen,
-                    gap,
-                    avg_gap,
-                    mode,
-                    gap, manual_thresh,
-                    gap, avg_gap, auto_thresh,
-                    num
-                ))
+            last_seen = dates[-1][0]  # Keep original string for DB storage
+            
+            # Calculate current gap (days since last appearance)
+            latest_date_str = self.conn.execute(
+                "SELECT MAX(date) FROM draws"
+            ).fetchone()[0]
+            latest_date = datetime.strptime(latest_date_str, '%m/%d/%Y')
+            current_gap = (latest_date - date_objs[-1]).days
+            
+            # Calculate historical average gap (in days)
+            if len(date_objs) > 1:
+                gaps = [(date_objs[i+1] - date_objs[i]).days 
+                       for i in range(len(date_objs)-1)]
+                avg_gap = sum(gaps) / len(gaps)
+            else:
+                avg_gap = current_gap  # If only appeared once
+                
+            # Determine overdue status
+            mode = self.config['analysis']['gap_analysis']['mode']
+            auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
+            manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
+            
+            is_overdue = (current_gap >= manual_thresh) if mode == 'manual' else (
+                         current_gap >= avg_gap * auto_thresh)
+            
+            # Update record
+            self.conn.execute("""
+                UPDATE number_gaps
+                SET last_seen_date = ?,
+                    current_gap = ?,
+                    avg_gap = ?,
+                    is_overdue = ?
+                WHERE number = ?
+            """, (last_seen, current_gap, avg_gap, int(is_overdue), num))
         
-        self._verify_gap_analysis()  # Show diagnostic data
+        self._verify_gap_analysis()
 
 ###############
     def update_gap_stats(self):
