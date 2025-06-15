@@ -1005,10 +1005,6 @@ class LotteryAnalyzer:
         """
         return {
         
-            'gap_analysis': {
-                'stats': self.get_gap_stats(),
-                'distribution': self.get_gap_distribution()
-            }
             'frequency': self.get_frequencies(),
             'primes': self.get_prime_stats(),
             'high_low': self.get_highlow_stats(),
@@ -1017,6 +1013,10 @@ class LotteryAnalyzer:
                     'primes': self._get_analysis_draw_limit('primes', 500),
                     'high_low': self._get_analysis_draw_limit('high_low', 400)
                 }
+            }
+            'gap_analysis': {
+                'stats': self.get_gap_stats(),
+                'distribution': self.get_gap_distribution()
             }
         }
 
