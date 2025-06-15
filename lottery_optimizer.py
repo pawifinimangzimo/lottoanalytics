@@ -362,6 +362,7 @@ class LotteryAnalyzer:
             print(f"🔴 Atomic check failed: {str(e)}")
             raise
 
+
     def _nuclear_repair(self):
         """Complete table reconstruction with detailed diagnostics"""
         print("\n🚀 Starting nuclear repair with diagnostics...")
@@ -369,7 +370,7 @@ class LotteryAnalyzer:
         # 1. Pre-repair diagnostics
         try:
             print("\n🔍 Pre-repair state:")
-            print(f"- Table exists: {bool(self.conn.execute('SELECT 1 FROM sqlite_master WHERE type=\"table\" AND name=\"number_gaps\"').fetchone())}")
+            print(f"- Table exists: {bool(self.conn.execute('SELECT 1 FROM sqlite_master WHERE type=''table'' AND name=''number_gaps''').fetchone())}")
             print(f"- Columns: {[col[1] for col in self.conn.execute('PRAGMA table_info(number_gaps)')]}")
         except Exception as e:
             print(f"⚠️ Pre-repair diagnostics failed: {str(e)}")
@@ -431,7 +432,6 @@ class LotteryAnalyzer:
         except Exception as e:
             print(f"🔴 Verification failed: {str(e)}")
             raise
-
 
     def _repair_schema(self):
         """Completely rebuild the table if corrupted"""
