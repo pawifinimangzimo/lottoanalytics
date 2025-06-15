@@ -1319,10 +1319,6 @@ def main():
                             nums = [str(row[f'n{i}']) for i in range(1, size+1)]
                             print(f"- {'-'.join(nums)} (appeared {row['frequency']} times)")
                         combos = analyzer._tag_prime_combos(combos, size)
-                        for _, row in combos.head(3).iterrows():
-                            nums = [str(row[f'n{i}']) for i in range(1, size+1)]
-                            prime_tag = " [All Primes]" if row['is_prime_combo'] else ""
-                            print(f"- {'-'.join(nums)} (appeared {row['frequency']} times){prime_tag}")
 
             # ============ INSERT NEW FEATURE OUTPUTS HERE ============
             if feature_results['patterns']:
