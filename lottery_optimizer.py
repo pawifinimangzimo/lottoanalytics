@@ -113,6 +113,19 @@ class LotteryAnalyzer:
             CREATE INDEX IF NOT EXISTS idx_low_numbers ON draws(n1,n2,n3,n4,n5,n6)
             WHERE n1 <= 10 OR n2 <= 10 OR n3 <= 10 OR n4 <= 10 OR n5 <= 10 OR n6 <= 10;
         """)
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS number_gaps (
+                number INTEGER PRIMARY KEY,
+                last_seen_date TEXT,
+                current_gap INTEGER DEFAULT 0,
+                avg_gap REAL,
+                max_gap INTEGER,
+                is_overdue BOOLEAN DEFAULT FALSE
+            );
+            CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue);
+        """)        
+        
         return conn
 
     def _prepare_filesystem(self) -> None:
@@ -306,6 +319,15 @@ class LotteryAnalyzer:
         """
         low_max = self.config['analysis']['high_low']['low_number_max']
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
+# Helpers         
+        
+    def _get_overdue_numbers(self) -> List[int]:
+        """Return list of numbers marked as overdue in number_gaps table"""
+        if not self.config['analysis']['gap_analysis']['enabled']:
+            return []
+        
+        query = "SELECT number FROM number_gaps WHERE is_overdue = TRUE"
+        return [row[0] for row in self.conn.execute(query)]
 #======================
 # Start Set generator
 #======================
@@ -488,33 +510,70 @@ class LotteryAnalyzer:
 #===============================
 
     def _init_mode_handler(self):
-        """Initialize the mode handling system"""
+        """Initialize mode and weights (now hybrid-aware)"""
         self.mode = self.config.get('mode', 'auto')
-        self._init_weights()
+        if hasattr(self, '_init_weights_hybrid'):  # Check if hybrid exists
+            self._init_weights()  # This now routes to hybrid or original
+        else:
+            self._init_weights()  # Pure fallback
         
     def _init_weights(self):
-        """Initialize weights based on current mode"""
-        if self.mode == 'auto':
-            # Auto-mode defaults
-            self.weights = pd.Series(1.0, index=self.number_pool)
-            self.learning_rate = self.config.get('auto', {}).get('learning_rate', 0.01)
-            self.decay_factor = self.config.get('auto', {}).get('decay_factor', 0.97)
+        """Original function now acts as a fallback shell"""
+        if self.config['analysis']['gap_analysis']['enabled']:
+            self._init_weights_hybrid()  # Try hybrid first
         else:
-            # Manual mode weights from config
-            weights_config = self.config.get('manual', {}).get('strategy', {}).get('weighting', {})
-            self.weights = pd.Series(
-                weights_config.get('frequency', 0.4) * self._get_frequency_weights() +
-                weights_config.get('recency', 0.3) * self._get_recent_weights() +
-                weights_config.get('randomness', 0.3) * np.random.rand(len(self.number_pool))
-            )
-            
-            # Apply cold number bonus
-            cold_bonus = weights_config.get('resurgence', 0.1)
-            cold_nums = self.get_temperature_stats()['cold']
-            self.weights[cold_nums] *= (1 + cold_bonus)
-            
-            self.weights /= self.weights.sum()
+            # Original logic (unchanged)
+            if self.mode == 'auto':
+                self.weights = pd.Series(1.0, index=self.number_pool)
+                self.learning_rate = self.config.get('auto', {}).get('learning_rate', 0.01)
+                self.decay_factor = self.config.get('auto', {}).get('decay_factor', 0.97)
+            else:
+                weights_config = self.config.get('manual', {}).get('strategy', {}).get('weighting', {})
+                self.weights = pd.Series(
+                    weights_config.get('frequency', 0.4) * self._get_frequency_weights() +
+                    weights_config.get('recency', 0.3) * self._get_recent_weights() +
+                    weights_config.get('randomness', 0.3) * np.random.rand(len(self.number_pool))
+                )
+                # Apply cold number bonus
+                cold_bonus = weights_config.get('resurgence', 0.1)
+                cold_nums = self.get_temperature_stats()['cold']
+                self.weights[cold_nums] *= (1 + cold_bonus)
+                self.weights /= self.weights.sum()
+
     
+    def _init_weights_hybrid(self):
+        """New hybrid weight calculation with gap + temperature support (non-destructive)"""
+        try:
+            # Base weights (same as original auto/manual logic)
+            if self.mode == 'auto':
+                base_weights = pd.Series(1.0, index=self.number_pool)
+            else:
+                weights_config = self.config.get('manual', {}).get('strategy', {}).get('weighting', {})
+                base_weights = (
+                    weights_config.get('frequency', 0.4) * self._get_frequency_weights() +
+                    weights_config.get('recency', 0.3) * self._get_recent_weights() +
+                    weights_config.get('randomness', 0.3) * np.random.rand(len(self.number_pool))
+                )
+
+            # Apply cold number bonus (original behavior)
+            cold_nums = self.get_temperature_stats()['cold']
+            cold_bonus = self.config['manual']['strategy']['weighting'].get('resurgence', 0.1)
+            base_weights[cold_nums] *= (1 + cold_bonus)
+
+            # Apply gap analysis (new behavior)
+            if self.config['analysis']['gap_analysis']['enabled']:
+                overdue_nums = set(self._get_overdue_numbers()) - set(cold_nums)  # Avoid overlap
+                gap_boost = self.config['analysis']['gap_analysis']['weight_influence']
+                base_weights[list(overdue_nums)] *= (1 + gap_boost)
+
+            # Normalize (same as original)
+            self.weights = base_weights / base_weights.sum()
+
+        except Exception as e:
+            logging.warning(f"Hybrid weight init failed: {e}. Falling back to original.")
+            self._init_weights()  # Fallback to original
+
+###################################
     def set_mode(self, mode: str):
         """Change modes dynamically"""
         valid_modes = ['auto', 'manual']
@@ -960,7 +1019,34 @@ class LotteryAnalyzer:
             logging.error(f"Sum frequency failed: {str(e)}")
             return {'error': 'Sum frequency analysis failed'}
 
-####################################################
+############### GAP ANALYSIS #####################################
+
+    def update_gap_stats(self):
+        """Run after loading new draw data"""
+        # Calculate gaps for all numbers
+        self.conn.execute("""
+            UPDATE number_gaps 
+            SET 
+                current_gap = current_gap + 1,
+                is_overdue = CASE 
+                    WHEN ? = 'manual' THEN current_gap + 1 >= ?
+                    ELSE current_gap + 1 >= avg_gap * ?
+                END
+        """, (self.config['gap_analysis']['mode'], 
+              self.config['gap_analysis']['manual_threshold'],
+              self.config['gap_analysis']['auto_threshold']))
+        
+        # Reset gaps for numbers in latest draw
+        nums_in_draw = [...]  # Extract from current draw
+        self.conn.executemany("""
+            UPDATE number_gaps 
+            SET 
+                last_seen_date = ?,
+                current_gap = 0,
+                is_overdue = FALSE
+            WHERE number = ?
+        """, [(draw_date, num) for num in nums_in_draw])
+
 ###########################################################################
 ########################
 
@@ -1372,13 +1458,27 @@ def main():
                 print(f"Set {i}: {'-'.join(map(str, nums))}")
             print("\n" + "="*50)
             #################################
+
             valid_sets = analyzer.generate_valid_sets()
 
             print("\n=== OPTIMIZED SETS ===")
             for i, s in enumerate(valid_sets, 1):
-                print(f"{i}. {'-'.join(map(str, s['numbers']))} ✅")
+                # Main numbers (clean format)
+                print(f"{i}. {'-'.join(map(str, s['numbers']))}")
+                
+                # Existing notes (sum, hot numbers)
                 for note in s['notes']:
                     print(f"   • {note}")
+                
+                # Strategy breakdown
+                cold_nums = [n for n in s['numbers'] if n in analyzer.get_temperature_stats()['cold']]
+                overdue_nums = []
+                if analyzer.config['analysis']['gap_analysis']['enabled']:
+                    overdue_nums = [n for n in s['numbers'] if n in analyzer._get_overdue_numbers()]
+                
+                print(f"   • Strategy: {len(cold_nums)} cold ({','.join(map(str, cold_nums))}), "
+                      f"{len(overdue_nums)} overdue ({','.join(map(str, overdue_nums))})")
+
         # Save files
         results_path = analyzer.save_results(sets)
         if not args.quiet:

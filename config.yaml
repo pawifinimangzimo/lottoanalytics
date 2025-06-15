@@ -59,6 +59,15 @@ analysis:
     warm: 30   # Semi-recent
     cold: 31   # Beginning of "cold" range
   show_combined_stats: true
+
+  gap_analysis:
+    enabled: true
+    mode: auto               # or "manual"
+    auto_threshold: 1.5      # (avg_gap * 1.5 = overdue)
+    manual_threshold: 10     # Fixed draw count (if mode: manual)
+    weight_influence: 0.3    # How much gaps affect set generation (0-1)
+    min_avg_gap: 5           # Ignore frequent numbers
+
   combined_stats_settings:
     min_overlap_significance: 0.5
     freq_cutoff: 20  # Top 20 considered "frequent"
