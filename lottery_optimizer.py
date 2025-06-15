@@ -1737,7 +1737,8 @@ def main():
         # ============ END FEATURE RESULTS INIT ============
         temp_stats = analyzer.get_temperature_stats()
         prime_temp_stats = analyzer.get_prime_temperature_stats()
-        overdue = analyzer.get_overdue_numbers() 
+        if not args.quiet and analyzer.config['analysis']['gap_analysis']['enabled']:
+            overdue = analyzer.get_overdue_numbers() 
         if not args.quiet:
             print("\n" + "="*50)
             print(" LOTTERY ANALYSIS RESULTS ".center(50, "="))
@@ -1760,18 +1761,16 @@ def main():
                 overdue_primes = [n for n in overdue if analyzer._is_prime(n)]
                 if overdue_primes:
                     print(f"   Primes: {', '.join(map(str, overdue_primes))}")
-####################### New Overd print ##############
-            if not args.quiet and analyzer.config['analysis']['gap_analysis']['enabled']:
-
-                if gap_data:
-                    print("\n⏰ Overdue Numbers Analysis:")
-                    if gap_data['most_overdue']:
-                        print(f"   - Most Overdue: {gap_data['most_overdue']['number']} "
-                              f"({gap_data['most_overdue']['current_gap']} draws, "
-                              f"{gap_data['most_overdue']['trend_slope']:+.1f} trend)")
-                    print(f"   - Average Gap: {gap_data['average_gap']:.1f} draws")
-                    print(f"   - Gap Distribution:")
-                    print(analyzer._generate_gap_histogram(gap_data['distribution']))
+####################### New Overd print ##############          
+            if gap_data:
+                print("\n⏰ Overdue Numbers Analysis:")
+                if gap_data['most_overdue']:
+                    print(f"   - Most Overdue: {gap_data['most_overdue']['number']} "
+                          f"({gap_data['most_overdue']['current_gap']} draws, "
+                          f"{gap_data['most_overdue']['trend_slope']:+.1f} trend)")
+                print(f"   - Average Gap: {gap_data['average_gap']:.1f} draws")
+                print(f"   - Gap Distribution:")
+                print(analyzer._generate_gap_histogram(gap_data['distribution']))
 ######################################################
 ######## HIGH LOW ###############
 
