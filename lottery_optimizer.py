@@ -328,6 +328,7 @@ class LotteryAnalyzer:
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers         
 
+
     def _verify_gap_analysis(self):
         """Verify gap analysis data exists"""
         # Check if any gaps recorded at all
@@ -1084,6 +1085,23 @@ class LotteryAnalyzer:
 
 ############### GAP ANALYSIS #####################################
 
+    def _parse_date(self, date_str):
+        """Flexible date parser handling multiple formats"""
+        formats = [
+            '%Y/%m/%d',    # YYYY/MM/DD
+            '%Y-%m-%d %H:%M:%S',  # YYYY-MM-DD HH:MM:SS
+            '%Y-%m-%d',    # YYYY-MM-DD
+            '%m/%d/%Y',    # MM/DD/YYYY (fallback)
+            '%m/%d/%y'     # MM/DD/YY (fallback)
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"Date '{date_str}' doesn't match any expected formats")
+
     def _initialize_gap_analysis(self):
         if not self.config['analysis']['gap_analysis']['enabled']:
             return
@@ -1114,11 +1132,11 @@ class LotteryAnalyzer:
             if not dates:
                 continue
                 
-            # Convert dates from YYYY/MM/DD to datetime objects
+            # Convert dates using flexible parser
             date_objs = []
             for d in dates:
                 try:
-                    date_objs.append(datetime.strptime(d[0], '%Y/%m/%d'))  # Changed to YYYY/MM/DD
+                    date_objs.append(self._parse_date(d[0]))
                 except ValueError as e:
                     print(f"⚠️ Failed to parse date {d[0]} for number {num}: {e}")
                     continue
@@ -1128,20 +1146,24 @@ class LotteryAnalyzer:
                 
             last_seen = dates[-1][0]  # Keep original string for DB storage
             
-            # Calculate current gap (days since last appearance)
+            # Calculate current gap
             latest_date_str = self.conn.execute(
                 "SELECT MAX(date) FROM draws"
             ).fetchone()[0]
-            latest_date = datetime.strptime(latest_date_str, '%Y/%m/%d')
-            current_gap = (latest_date - date_objs[-1]).days
+            try:
+                latest_date = self._parse_date(latest_date_str)
+                current_gap = (latest_date - date_objs[-1]).days
+            except ValueError as e:
+                print(f"⚠️ Failed to calculate gap for number {num}: {e}")
+                continue
             
-            # Calculate historical average gap (in days)
+            # Calculate historical average gap
             if len(date_objs) > 1:
                 gaps = [(date_objs[i+1] - date_objs[i]).days 
                        for i in range(len(date_objs)-1)]
                 avg_gap = sum(gaps) / len(gaps)
             else:
-                avg_gap = current_gap  # If only appeared once
+                avg_gap = current_gap
                 
             # Determine overdue status
             mode = self.config['analysis']['gap_analysis']['mode']
