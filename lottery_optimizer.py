@@ -789,20 +789,26 @@ class LotteryAnalyzer:
 ############ SUMMARY ANALYSIS ######################
 
     def get_sum_stats(self) -> dict:
-        """Calculate historical sum statistics (mean, min, max, quartiles)."""
+        """SQLite-compatible sum statistics using approximate percentiles"""
         query = """
         WITH sums AS (
-            SELECT (n1+n2+n3+n4+n5+n6) as total 
+            SELECT (n1+n2+n3+n4+n5+n6) as total,
+                   COUNT() OVER () as n
             FROM draws
+        ),
+        sorted AS (
+            SELECT total, ROW_NUMBER() OVER (ORDER BY total) as row_num
+            FROM sums
         )
         SELECT
             AVG(total) as avg_sum,
             MIN(total) as min_sum,
             MAX(total) as max_sum,
-            percentile_cont(0.25) WITHIN GROUP (ORDER BY total) as q1_sum,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY total) as median_sum,
-            percentile_cont(0.75) WITHIN GROUP (ORDER BY total) as q3_sum
+            (SELECT total FROM sorted WHERE row_num = CAST(n*0.25 AS INT)) as q1_sum,
+            (SELECT total FROM sorted WHERE row_num = CAST(n*0.5 AS INT)) as median_sum,
+            (SELECT total FROM sorted WHERE row_num = CAST(n*0.75 AS INT)) as q3_sum
         FROM sums
+        LIMIT 1
         """
         try:
             result = self.conn.execute(query).fetchone()
@@ -819,7 +825,7 @@ class LotteryAnalyzer:
             return {'error': 'Sum analysis failed'}
 
     def get_sum_frequencies(self, bin_size: int = 10) -> dict:
-        """Generate a histogram of sum frequencies (binned ranges)."""
+        """SQLite-compatible sum frequency bins using CAST instead of FLOOR"""
         query = f"""
         WITH sums AS (
             SELECT (n1+n2+n3+n4+n5+n6) as total 
@@ -827,10 +833,10 @@ class LotteryAnalyzer:
         ),
         bins AS (
             SELECT 
-                FLOOR(total/{bin_size})*{bin_size} as lower_bound,
+                CAST(total/{bin_size} AS INT)*{bin_size} as lower_bound,
                 COUNT(*) as frequency
             FROM sums
-            GROUP BY FLOOR(total/{bin_size})
+            GROUP BY CAST(total/{bin_size} AS INT)
         )
         SELECT 
             lower_bound,
