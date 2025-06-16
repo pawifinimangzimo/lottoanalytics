@@ -92,10 +92,27 @@ class LotteryAnalyzer:
             )
 
     def _init_db(self) -> sqlite3.Connection:
-        """Initialize SQLite database with optimized schema"""
+        """Initialize SQLite database with optimized settings"""
         Path(self.config['data']['db_path']).parent.mkdir(exist_ok=True)
-        conn = sqlite3.connect(self.config['data']['db_path'])
         
+        # Add these PRAGMA statements for better performance and safety
+        conn = sqlite3.connect(
+            self.config['data']['db_path'],
+            isolation_level='IMMEDIATE',  # Better for concurrent access
+            timeout=30.0  # Longer timeout for busy conditions
+        )
+        
+        # Set PRAGMAs for performance and reliability
+        conn.executescript("""
+            PRAGMA journal_mode = WAL;  -- Better concurrency
+            PRAGMA synchronous = NORMAL; -- Good balance of safety/performance
+            PRAGMA foreign_keys = OFF;   -- Disable if not using FKs
+            PRAGMA cache_size = -10000;  -- 10MB cache
+            PRAGMA temp_store = MEMORY;  -- Keep temp tables in RAM
+            PRAGMA mmap_size = 268435456; -- 256MB memory mapping
+        """)
+        
+        # Keep your existing schema creation code below this line
         conn.execute("""
             CREATE TABLE IF NOT EXISTS draws (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,21 +121,30 @@ class LotteryAnalyzer:
                 n4 INTEGER, n5 INTEGER, n6 INTEGER
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON draws(date)")
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_numbers 
-            ON draws(n1,n2,n3,n4,n5,n6)
-        """)
-        
+
+        # Replace your current index creation code with these optimized indexes
         conn.executescript("""
-            CREATE INDEX IF NOT EXISTS idx_primes ON draws(n1,n2,n3,n4,n5,n6)
+            -- Composite covering index for date and all numbers
+            CREATE INDEX IF NOT EXISTS idx_draws_covering ON draws(
+                date, n1, n2, n3, n4, n5, n6
+            );
+            
+            -- Optimized partial indexes
+            CREATE INDEX IF NOT EXISTS idx_primes_partial ON draws(n1)
             WHERE n1 IN (2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53);
             
-            CREATE INDEX IF NOT EXISTS idx_low_numbers ON draws(n1,n2,n3,n4,n5,n6)
-            WHERE n1 <= 10 OR n2 <= 10 OR n3 <= 10 OR n4 <= 10 OR n5 <= 10 OR n6 <= 10;
-        """)
-
-        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_low_numbers_partial ON draws(n1)
+            WHERE n1 <= 10;
+            
+            -- Add indexes for each number column if doing individual lookups
+            CREATE INDEX IF NOT EXISTS idx_n1 ON draws(n1);
+            CREATE INDEX IF NOT EXISTS idx_n2 ON draws(n2);
+            CREATE INDEX IF NOT EXISTS idx_n3 ON draws(n3);
+            CREATE INDEX IF NOT EXISTS idx_n4 ON draws(n4);
+            CREATE INDEX IF NOT EXISTS idx_n5 ON draws(n5);
+            CREATE INDEX IF NOT EXISTS idx_n6 ON draws(n6);
+            
+            -- Your existing gap analysis table creation
             CREATE TABLE IF NOT EXISTS number_gaps (
                 number INTEGER PRIMARY KEY,
                 last_seen_date TEXT,
@@ -128,7 +154,7 @@ class LotteryAnalyzer:
                 is_overdue BOOLEAN DEFAULT FALSE
             );
             CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue);
-        """)        
+        """)       
         
         return conn
 
@@ -137,50 +163,79 @@ class LotteryAnalyzer:
         Path(self.config['data']['results_dir']).mkdir(exist_ok=True)
 
     def load_data(self) -> None:
-        """Load CSV data into SQLite with validation"""
+        """Use transactions for bulk inserts"""
         try:
-            df = pd.read_csv(
-                self.config['data']['historical_csv'],
-                header=None,
-                names=['date', 'numbers'],
-                parse_dates=['date']
-            )
-            
-            # Split numbers into columns
-            nums = df['numbers'].str.split('-', expand=True)
-            for i in range(self.config['strategy']['numbers_to_select']):
-                df[f'n{i+1}'] = nums[i].astype(int)
-            
-            # Validate number ranges
-            pool_size = self.config['strategy']['number_pool']
-            for i in range(1, self.config['strategy']['numbers_to_select'] + 1):
-                invalid = df[(df[f'n{i}'] < 1) | (df[f'n{i}'] > pool_size)]
-                if not invalid.empty:
-                    raise ValueError(f"Invalid numbers in n{i} (range 1-{pool_size})")
-            
-            # Store in SQLite
-            df[['date'] + [f'n{i}' for i in range(1, 7)]].to_sql(
-                'draws', self.conn, if_exists='replace', index=False
-            )
-
-            # Move gap analysis initialization AFTER data is loaded
-            if self.config['analysis']['gap_analysis']['enabled']:
-                self._initialize_gap_analysis()
-   
+            with self.conn:  # This creates a transaction
+                df = pd.read_csv(
+                    self.config['data']['historical_csv'],
+                    header=None,
+                    names=['date', 'numbers'],
+                    parse_dates=['date']
+                )
+                
+                # Split numbers into columns
+                nums = df['numbers'].str.split('-', expand=True)
+                for i in range(self.config['strategy']['numbers_to_select']):
+                    df[f'n{i+1}'] = nums[i].astype(int)
+                
+                # Validate number ranges
+                pool_size = self.config['strategy']['number_pool']
+                for i in range(1, self.config['strategy']['numbers_to_select'] + 1):
+                    invalid = df[(df[f'n{i}'] < 1) | (df[f'n{i}'] > pool_size)]
+                    if not invalid.empty:
+                        raise ValueError(f"Invalid numbers in n{i} (range 1-{pool_size})")
+                
+                # Batch insert with transaction
+                self.conn.execute("BEGIN TRANSACTION")
+                try:
+                    df[['date'] + [f'n{i}' for i in range(1, 7)]].to_sql(
+                        'draws', self.conn, if_exists='replace', index=False,
+                        method='multi', chunksize=1000  # Batch inserts
+                    )
+                    self.conn.execute("COMMIT")
+                except Exception as e:
+                    self.conn.execute("ROLLBACK")
+                    raise
+       
+                # Move gap analysis initialization AFTER data is loaded
+                if self.config['analysis']['gap_analysis']['enabled']:
+                    self._initialize_gap_analysis()
+       
         except Exception as e:
             raise ValueError(f"Data loading failed: {str(e)}")
 ####################
-    def get_frequencies(self, count: int = None) -> pd.Series:
-        """Get number frequencies using optimized SQL query"""
+
+    def get_frequencies(self, count: int = None, force_refresh: bool = False) -> pd.Series:
+        """Public method with caching (replaces original)"""
+        # Initialize cache if it doesn't exist
+        if not hasattr(self, '_cache'):
+            self._cache = {'frequencies': None}
+        
+        # Return cached result if available and not forcing refresh
+        if not force_refresh and self._cache['frequencies'] is not None:
+            return self._cache['frequencies']
+            
+        # Otherwise, execute the core query and cache the result
+        result = self._get_frequencies_impl(count)
+        self._cache['frequencies'] = result
+        return result
+
+    def get_frequencies_impl(self, count: int = None) -> pd.Series:
+        """Optimized frequency query"""
         top_n = count or self.config['analysis']['top_range']
+        
+        # Use parameterized queries and proper indexing
         query = """
-            WITH nums AS (
-                SELECT n1 AS num FROM draws UNION ALL
-                SELECT n2 FROM draws UNION ALL
-                SELECT n3 FROM draws UNION ALL
-                SELECT n4 FROM draws UNION ALL
-                SELECT n5 FROM draws UNION ALL
-                SELECT n6 FROM draws
+            WITH RECURSIVE cnt(x) AS (
+                VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<6
+            ),
+            nums AS (
+                SELECT 
+                    CASE cnt.x
+                        WHEN 1 THEN n1 WHEN 2 THEN n2 WHEN 3 THEN n3
+                        WHEN 4 THEN n4 WHEN 5 THEN n5 WHEN 6 THEN n6
+                    END AS num
+                FROM draws, cnt
             )
             SELECT num, COUNT(*) as frequency 
             FROM nums 
@@ -188,13 +243,18 @@ class LotteryAnalyzer:
             ORDER BY frequency DESC
             LIMIT ?
         """
-        result = pd.read_sql(query, self.conn, params=(top_n,))
+        # Use fetchall() instead of pandas for simple queries
+        cursor = self.conn.cursor()
+        cursor.execute(query, (top_n,))
+        result = cursor.fetchall()
+        cursor.close()
         
-        # Return empty Series with correct structure if no results
-        if result.empty:
+        if not result:
             return pd.Series(dtype=float, name='frequency')
             
-        return result.set_index('num')['frequency']
+        nums, freqs = zip(*result)
+        return pd.Series(freqs, index=nums, name='frequency')
+
 ##############################
 # ======================
 # COMBINATION ANALYSIS 
@@ -329,38 +389,81 @@ class LotteryAnalyzer:
         return self.conn.execute(query, (low_max, low_max)).fetchone()[0]
 # Helpers
 
-    def _atomic_gap_check(self):
-        """Thread-safe schema verification with diagnostics"""
-        try:
+    def perform_maintenance(self):
+        """Run database maintenance tasks"""
+        with self.conn:
+            self.conn.execute("PRAGMA optimize")  # New in SQLite 3.18+
+            self.conn.execute("PRAGMA analysis_limit=400")  # Increase analysis
+            self.conn.execute("PRAGMA optimize")  # Run analysis
+            
+        # Only vacuum occasionally as it's expensive
+        if self.config.get('maintenance', {}).get('should_vacuum', False):
             with self.conn:
-                # Create table if not exists
-                self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS number_gaps (
-                    number INTEGER PRIMARY KEY,
-                    last_seen_date TEXT,
-                    current_gap INTEGER DEFAULT 0,
-                    avg_gap REAL,
-                    max_gap INTEGER,
-                    is_overdue BOOLEAN DEFAULT FALSE
-                )""")
-                
-                # Check column existence
-                cols = [col[1] for col in self.conn.execute("PRAGMA table_info(number_gaps)")]
-                if 'is_overdue' not in cols:
-                    print("⚠️ Adding missing is_overdue column")
-                    self.conn.execute("ALTER TABLE number_gaps ADD COLUMN is_overdue BOOLEAN DEFAULT FALSE")
-                
-                # Verify index
-                self.conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_overdue ON number_gaps(is_overdue)
-                """)
-                
-                # Immediate test query
-                self.conn.execute("SELECT is_overdue FROM number_gaps LIMIT 1")
-            return True
-        except Exception as e:
-            print(f"🔴 Atomic check failed: {str(e)}")
-            raise
+                self.conn.execute("VACUUM")
+
+    def _get_frequencies_uncached(self, count: int = None) -> pd.Series:
+        """Original frequency query implementation"""
+        top_n = count or self.config['analysis']['top_range']
+        query = """
+            WITH nums AS (
+                SELECT n1 AS num FROM draws UNION ALL
+                SELECT n2 FROM draws UNION ALL
+                SELECT n3 FROM draws UNION ALL
+                SELECT n4 FROM draws UNION ALL
+                SELECT n5 FROM draws UNION ALL
+                SELECT n6 FROM draws
+            )
+            SELECT num, COUNT(*) as frequency 
+            FROM nums 
+            GROUP BY num 
+            ORDER BY frequency DESC
+            LIMIT ?
+        """
+        result = pd.read_sql(query, self.conn, params=(top_n,))
+        return result.set_index('num')['frequency'] if not result.empty else pd.Series(dtype=float, name='frequency')
+
+    def _atomic_gap_check(self):
+        """Improved with better error recovery"""
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                with self.conn:
+                    # Check if table exists
+                    if not self.conn.execute("""
+                        SELECT count(*) FROM sqlite_master 
+                        WHERE type='table' AND name='number_gaps'
+                    """).fetchone()[0]:
+                        raise RuntimeError("number_gaps table does not exist")
+
+                    # Verify columns
+                    cols = {col[1] for col in 
+                          self.conn.execute("PRAGMA table_info(number_gaps)")}
+                    
+                    required = {'number', 'last_seen_date', 'current_gap', 
+                              'avg_gap', 'is_overdue'}
+                    missing = required - cols
+                    if missing:
+                        if attempt == max_attempts - 1:  # Last attempt
+                            raise RuntimeError(f"Missing columns: {missing}")
+                        self._repair_schema()
+                        continue
+                        
+                    # Verify index exists
+                    indexes = {row[1] for row in 
+                              self.conn.execute("PRAGMA index_list(number_gaps)")}
+                    if 'idx_overdue' not in indexes:
+                        self.conn.execute("""
+                            CREATE INDEX IF NOT EXISTS idx_overdue 
+                            ON number_gaps(is_overdue)
+                        """)
+                    
+                    return True
+                    
+            except sqlite3.Error as e:
+                if attempt == max_attempts - 1:
+                    raise RuntimeError(f"Failed to verify schema after {max_attempts} attempts: {e}")
+                time.sleep(1 * (attempt + 1))  # Exponential backoff
+                continue
 
 
     def _nuclear_repair(self):
@@ -1486,87 +1589,68 @@ class LotteryAnalyzer:
         raise ValueError(f"Date '{date_str}' doesn't match any expected formats")
 
     def _initialize_gap_analysis(self):
+        """Optimized gap analysis initialization"""
         if not self.config['analysis']['gap_analysis']['enabled']:
             return
             
-        print("\nINITIALIZING GAP ANALYSIS...")
-
-        # 1. Get all numbers that have ever appeared
-        existing_nums = set()
-        for i in range(1,7):
-            nums = self.conn.execute(f"SELECT DISTINCT n{i} FROM draws").fetchall()
-            existing_nums.update(n[0] for n in nums)
-        
-        # 2. Initialize table with ALL pool numbers
-        self.conn.executemany(
-            "INSERT OR IGNORE INTO number_gaps (number) VALUES (?)",
-            [(n,) for n in self.number_pool]
-        )
-        
-        # 3. Calculate initial gaps for existing numbers
-        for num in existing_nums:
-            # Get all appearance dates for this number
-            dates = self.conn.execute("""
-                SELECT date FROM draws
-                WHERE ? IN (n1,n2,n3,n4,n5,n6)
-                ORDER BY date
-            """, (num,)).fetchall()
+        with self.conn:  # Wrap in transaction
+            # Use a single query to find all numbers that have appeared
+            existing_nums = {row[0] for row in 
+                self.conn.execute("SELECT DISTINCT n1 FROM draws UNION SELECT n2 FROM draws UNION SELECT n3 FROM draws UNION SELECT n4 FROM draws UNION SELECT n5 FROM draws UNION SELECT n6 FROM draws")}
             
-            if not dates:
-                continue
-                
-            # Convert dates using flexible parser
-            date_objs = []
-            for d in dates:
-                try:
-                    date_objs.append(self._parse_date(d[0]))
-                except ValueError as e:
-                    print(f"⚠️ Failed to parse date {d[0]} for number {num}: {e}")
-                    continue
-                    
-            if not date_objs:
-                continue
-                
-            last_seen = dates[-1][0]  # Keep original string for DB storage
+            # Bulk insert missing numbers
+            missing = set(self.number_pool) - existing_nums
+            if missing:
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO number_gaps (number) VALUES (?)",
+                    [(n,) for n in missing]
+                )
             
-            # Calculate current gap
-            latest_date_str = self.conn.execute(
+            # Use a single query to get latest draw date
+            latest_date = self.conn.execute(
                 "SELECT MAX(date) FROM draws"
             ).fetchone()[0]
-            try:
-                latest_date = self._parse_date(latest_date_str)
-                current_gap = (latest_date - date_objs[-1]).days
-            except ValueError as e:
-                print(f"⚠️ Failed to calculate gap for number {num}: {e}")
-                continue
             
-            # Calculate historical average gap
-            if len(date_objs) > 1:
-                gaps = [(date_objs[i+1] - date_objs[i]).days 
-                       for i in range(len(date_objs)-1)]
-                avg_gap = sum(gaps) / len(gaps)
-            else:
-                avg_gap = current_gap
+            # Process all numbers in one pass
+            for num in existing_nums:
+                # Get all appearances in one query
+                dates = [row[0] for row in self.conn.execute(
+                    "SELECT date FROM draws WHERE ? IN (n1,n2,n3,n4,n5,n6) ORDER BY date",
+                    (num,)
+                )]
                 
-            # Determine overdue status
-            mode = self.config['analysis']['gap_analysis']['mode']
-            auto_thresh = self.config['analysis']['gap_analysis']['auto_threshold']
-            manual_thresh = self.config['analysis']['gap_analysis']['manual_threshold']
-            
-            is_overdue = (current_gap >= manual_thresh) if mode == 'manual' else (
-                         current_gap >= avg_gap * auto_thresh)
-            
-            # Update record
-            self.conn.execute("""
-                UPDATE number_gaps
-                SET last_seen_date = ?,
-                    current_gap = ?,
-                    avg_gap = ?,
-                    is_overdue = ?
-                WHERE number = ?
-            """, (last_seen, current_gap, avg_gap, int(is_overdue), num))
-        
-        self._verify_gap_analysis()
+                if not dates:
+                    continue
+                    
+                last_seen = dates[-1]
+                current_gap = (datetime.now() - self._parse_date(last_seen)).days
+                
+                # Calculate average gap more efficiently
+                if len(dates) > 1:
+                    avg_gap = sum(
+                        (self._parse_date(dates[i+1]) - self._parse_date(dates[i])).days
+                        for i in range(len(dates)-1)
+                    ) / (len(dates)-1)
+                else:
+                    avg_gap = current_gap
+                    
+                # Determine overdue status
+                mode = self.config['analysis']['gap_analysis']['mode']
+                is_overdue = False
+                if mode == 'manual':
+                    is_overdue = current_gap >= self.config['analysis']['gap_analysis']['manual_threshold']
+                else:
+                    is_overdue = current_gap >= avg_gap * self.config['analysis']['gap_analysis']['auto_threshold']
+                
+                # Single update statement
+                self.conn.execute("""
+                    UPDATE number_gaps
+                    SET last_seen_date = ?,
+                        current_gap = ?,
+                        avg_gap = ?,
+                        is_overdue = ?
+                    WHERE number = ?
+                """, (last_seen, current_gap, avg_gap, int(is_overdue), num))
 
 ###############
     def update_gap_stats(self):
@@ -1623,6 +1707,13 @@ class DashboardGenerator:
         self.dashboard_dir = Path(analyzer.config['data']['results_dir']) / "dashboard"
         self.dashboard_dir.mkdir(exist_ok=True)
 
+        # Add caching for frequently accessed data
+        self._cache = {
+            'frequencies': None,
+            'temperature_stats': None,
+            'prime_stats': None,
+            'last_updated': None
+        }
     # ======================
     # NEW SAFE PARSER METHOD
     # ======================
